@@ -1,0 +1,99 @@
+{
+  "version": 1,
+  "note": "挂在桌宠身上的后补扩展清单。上游从 GitHub 整包升级会覆盖源码，这份清单和下面这些扩展都要重新适配；本地补丁按 patch 标记在源码里找。",
+  "pet": {
+    "name": "dshlive2d控制台",
+    "root": ".",
+    "settingsFile": "settings.json",
+    "chatLog": "cache\\chat.log",
+    "apiFile": "api.json",
+    "pipeNameScheme": "FishPet.<sha256(用户名|bin目录大写)前20位>",
+    "events": [
+      "click",
+      "drag_start",
+      "drag_end",
+      "user_says"
+    ],
+    "tools": [
+      "say",
+      "look_in_mirror",
+      "look_back",
+      "set_activity",
+      "dress",
+      "get_state",
+      "update_settings",
+      "recent_events",
+      "quit",
+      "open_settings",
+      "adapt_model"
+    ],
+    "settingsKeys": [
+      "Shape",
+      "Outfit",
+      "Fps",
+      "Scale",
+      "BubbleScale",
+      "BubbleSeconds",
+      "HideOnFullscreen",
+      "CheckUpdates",
+      "FollowMouse",
+      "IdleSeconds",
+      "Left",
+      "Top",
+      "AutoStart",
+      "SessionTarget"
+    ]
+  },
+  "extensions": [
+    {
+      "id": "in-pet-tray-settings-chatbox",
+      "kind": "in-pet",
+      "where": "上游源码里的 local patch（PetWindow.cs / PetTray.cs / SettingsWindow.cs / ChatWindow.cs）",
+      "provides": [
+        "托盘常驻与唤起",
+        "中键输入框",
+        "右键菜单",
+        "滚轮缩放",
+        "设置面板",
+        "user_says 落盘 cache\\chat.log"
+      ],
+      "dependsOn": {
+        "events": [
+          "user_says"
+        ],
+        "files": [
+          "cache\\chat.log"
+        ],
+        "settings": [
+          "AutoStart",
+          "SessionTarget"
+        ]
+      },
+      "redoIfUpgraded": "按源码里的 local patch 标记重做（托盘 / 设置面板 / 多显示器菜单）"
+    },
+    {
+      "id": "dsh-live2d-console",
+      "kind": "dsh-plugin",
+      "status": "installed",
+      "bindsTo": "pet",
+      "where": "组件根目录（profile 的 bundle + link: 依赖加载，补丁层在组件自己的 cordis.patch.yml）",
+      "dependsOn": {
+        "events": [
+          "user_says"
+        ],
+        "files": [
+          "cache\\chat.log"
+        ],
+        "settings": [
+          "SessionTarget"
+        ],
+        "petApi": [
+          "say 工具 / api.json"
+        ]
+      },
+      "rule": "插件启动时读本文件：pet.events 缺 user_says、pet.settingsKeys 缺 SessionTarget、或 chat.log 路径对不上，就判定为桌宠已升级需要适配，直接报错提示，不要静默降级",
+      "todo": "新 user_says → dsh.agents.get(session)。会话 target 从 settings.json 的 SessionTarget 读；目标会话 turn/end 的正文写 cache/say.txt，桌宠读出来说。",
+      "note": "改完这里或插件代码，要重启 DSH 才生效；回滚 = 删 cordis.patch.yml 里这条 insert。"
+    }
+  ]
+}

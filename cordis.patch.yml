@@ -1,0 +1,14 @@
+# dsh-live2d-console —— bundle 自己的补丁层
+# 只把插件挂在 live2d-console 这个 id 上；配置全部在这里，profile 不需要再手写 insert。
+#
+# 可调项（设置页「dshlive2d控制台」里能改 followDsh，其余改这里）：
+#   petRoot    桌宠根目录（读 settings.json / extensions.json，写 cache\chat.log 与 cache\say.txt）；留空 = 组件旁的 pet\
+#   dataDir    桥自己的生成物目录（bridge.log）；留空 = 组件 mod-loads-12
+#   followDsh  桌宠是否跟随 DSH 启停；关掉后 DSH 启动不拉她，退出也不管她
+- insert:
+    - id: live2d-console
+      name: 'dsh-live2d-console'
+      config:
+        # petRoot / dataDir 不写就用默认：组件目录旁的 pet\ 与 mod-loads-12\，
+        # 这样仓库 clone 到任何位置都能直接用。
+        followDsh: true

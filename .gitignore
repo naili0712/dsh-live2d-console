@@ -1,0 +1,30 @@
+# 本机安装记录与运行配置：不进仓库
+config/
+install.json
+pet/settings.json
+pet/adapt/
+pet/cache/
+pet/workspace/
+pet/check/
+mod-loads-12/
+
+# 桌宠编译与运行产物
+pet/bin/
+pet/src/**/bin/
+pet/src/**/obj/
+pet/renderer/build/
+
+# 上游要求不随包分享：模型与 Live2D SDK 要使用者自己按各自许可获取
+pet/model/
+pet/sdk/
+
+# 打包产物
+*.tar.gz
+
+# 系统杂项
+Thumbs.db
+Desktop.ini
+*.log
+
+# 本机接口口令，运行时生成
+pet/api.json

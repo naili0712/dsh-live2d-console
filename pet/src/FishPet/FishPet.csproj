@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <!-- local patch (托盘): NotifyIcon 要 WinForms，和 WPF 同进程共存 -->
+    <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationIcon>..\..\tray.ico</ApplicationIcon>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>preview</LangVersion>
+    <AssemblyName>FishPet</AssemblyName>
+    <RootNamespace>FishPet</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- local patch (托盘): WinForms 的隐式 using 会和 WPF 撞（Point/Image/Color/TextBox），只在本文件里显式引用 -->
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+    <Using Remove="System.Drawing.Design" />
+  </ItemGroup>
+</Project>
