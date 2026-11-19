@@ -13,7 +13,7 @@ namespace FishPet;
 // local patch (设置面板): 托盘或右键打开的独立设置窗——改完立刻生效、顺手落盘。
 // local patch (模型页): 三个页签：外观与行为 / 模型与适配 / 动作与差分。
 // local patch (模型适配): 空闲与点击的选择按模型分开存在 adapt 文件夹里，换模型自动各用各的；
-// 六个点击触发是照着大肥鱼那套写的，换模型后要重新指到该模型的差分或动作上（可以让 AI 配）。
+// 六个点击触发按内置模型配置，换模型后需重新指定该模型的差分或动作（可由 AI 配置）。
 internal sealed class SettingsWindow : Window
 {
     private readonly Settings settings;
@@ -39,9 +39,9 @@ internal sealed class SettingsWindow : Window
     private readonly ComboBox fps = new() { Width = 160 };
     private readonly Slider idle = new() { Minimum = 15, Maximum = 600, TickFrequency = 5, IsSnapToTickEnabled = true, Width = 150 };
     private readonly CheckBox follow = new() { Content = "视线跟着鼠标" };
-    private readonly CheckBox hide = new() { Content = "别的程序全屏时藏起来" };
-    private readonly CheckBox auto = new() { Content = "登录 Windows 时自动出现" };
-    private readonly CheckBox lockPos = new() { Content = "固定位置（点她不会变成拖她）" }; // local patch (锁定位置)
+    private readonly CheckBox hide = new() { Content = "其他程序全屏时隐藏" };
+    private readonly CheckBox auto = new() { Content = "登录 Windows 时自动启动" };
+    private readonly CheckBox lockPos = new() { Content = "固定位置（点击不会变成拖动）" }; // local patch (锁定位置)
     private readonly ComboBox session = new() { Width = 250, IsEditable = true };
     private readonly TextBlock note = new() { TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = new SolidColorBrush(Color.FromRgb(120, 126, 148)) };
     // local patch (模型页): 模型下拉、当前模型说明
@@ -138,7 +138,7 @@ internal sealed class SettingsWindow : Window
         panel.Children.Add(Group("差分"));
         panel.Children.Add(new TextBlock
         {
-            Text = "当前模型自带的表情/差分，勾上就一直开着；换模型时自动换成那个模型自己那份。想让她穿哪件、戴什么，在这里勾。",
+            Text = "当前模型自带的表情与差分。选中后保持开启，切换模型时自动改用该模型对应的配置。",
             TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = new SolidColorBrush(Color.FromRgb(120, 126, 148)), Margin = new Thickness(0, 4, 0, 4),
         });
         panel.Children.Add(diffs);
@@ -156,7 +156,7 @@ internal sealed class SettingsWindow : Window
         again.Click += (_, _) => session.ItemsSource = RecentSessions();
         pick.Children.Add(again);
         panel.Children.Add(pick);
-        note.Text = "留空 = 桥会自己建一个「dshlive2d控制台 · 桌面」会话专门用；也可以填 session-… 指定。填了但那个会话不在线时，会回退到最近活跃的会话（跳过 Aurabot 的）。";
+        note.Text = "留空表示由桥接组件自动创建「dshlive2d控制台 · 桌面」会话并专用；也可填写 session-… 指定会话。指定会话不在线时，回退到最近活跃的会话（跳过 Aurabot 会话）。";
         panel.Children.Add(note);
 
         // local patch (模型页): 三个页签；按钮钉在底部，页签和滚动条各页各的
@@ -221,8 +221,8 @@ internal sealed class SettingsWindow : Window
         page.Children.Add(Group("装着的扩展"));
         page.Children.Add(new TextBlock
         {
-            Text = "每个扩展是一个文件夹，放在插件目录的 extensions 里，里面一个 pack.json 写它带了什么：动作词（〔〕里能写的）、表情（点她和闲着时演的）、台词（内容库）。内置那套永远优先，扩展只补它没占的名字；两个扩展抢同一个名字，按文件夹名排前面的赢。装好后重新扫描，动作与差分页里就会多出它们的选项，并注明是哪个包带来的。" +
-                   Environment.NewLine + "包是按发布时的那个模型写的——换到这个模型上它不一定做得出同样的动作，点那个包的「扩展适配」，让 AI 读模型本身改写一份适配层（原包不动）。手边没有现成的包，就点「获取扩展」，把视频或素材拖进去，让 AI 认里面的动作再写成包。",
+            Text = "每个扩展是一个文件夹，置于插件目录的 extensions 下，其中的 pack.json 声明该扩展提供的内容：动作词（可在〔〕中使用）、表情（点击与空闲时播放）、台词（内容库）。内置内容始终优先，扩展仅补充未被占用的名称；两个扩展使用同一名称时，按文件夹名排序靠前者生效。安装后点击「重新扫描」，「动作与差分」页将增加对应选项，并标注来源扩展包。" +
+                   Environment.NewLine + "扩展包按发布时对应的模型编写，在当前模型上不一定能够做出相同动作。点击该扩展包的「扩展适配」，由 AI 读取当前模型并生成适配层（原扩展包不做修改）。若没有现成扩展包，可点击「获取扩展」，将视频或素材拖入，由 AI 识别动作后生成扩展包。",
             TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = new SolidColorBrush(Color.FromRgb(120, 126, 148)), Margin = new Thickness(0, 2, 0, 6),
         });
         var bar = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 8) };
@@ -237,16 +237,16 @@ internal sealed class SettingsWindow : Window
 
         if (Extensions.All.Count == 0)
         {
-            page.Children.Add(new TextBlock { Text = "还没有装扩展。把扩展包文件夹放进 extensions 里，再点「重新扫描」。", FontSize = 12, Foreground = new SolidColorBrush(Color.FromRgb(120, 126, 148)) });
+            page.Children.Add(new TextBlock { Text = "尚未安装扩展。将扩展包文件夹放入 extensions 后，点击「重新扫描」。", FontSize = 12, Foreground = new SolidColorBrush(Color.FromRgb(120, 126, 148)) });
         }
         foreach (var pack in Extensions.All) page.Children.Add(PackRow(pack));
 
         if (Extensions.Skipped.Count > 0)
         {
-            page.Children.Add(Group("同名没装上的"));
+            page.Children.Add(Group("未加载的同名扩展"));
             page.Children.Add(new TextBlock
             {
-                Text = string.Join("、", Extensions.Skipped.Select(pair => pair.Key + "（被 " + Extensions.PackName(pair.Value) + " 占了）")),
+                Text = string.Join("、", Extensions.Skipped.Select(pair => pair.Key + "（已由 " + Extensions.PackName(pair.Value) + " 占用）")),
                 TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = new SolidColorBrush(Color.FromRgb(180, 90, 40)), Margin = new Thickness(0, 2, 0, 4),
             });
         }
@@ -258,13 +258,13 @@ internal sealed class SettingsWindow : Window
         page.Children.Add(Group("内容库"));
         page.Children.Add(new TextBlock
         {
-            Text = "扩展带来的台词按种类合在一起：待机嘀咕（mutter）、小剧场（skit）、首次出场（welcome）、事件反应（event）。这一版先把它们收进来登记、能看有多少条；什么时候挑哪一句来说，留给下一版接。",
+            Text = "扩展提供的台词按类型汇总：待机独白（mutter）、小剧场（skit）、首次出场（welcome）、事件反应（event）。当前版本仅做登记与计数，具体选用规则留待后续版本实现。",
             TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = new SolidColorBrush(Color.FromRgb(120, 126, 148)), Margin = new Thickness(0, 2, 0, 6),
         });
         var libraries = Extensions.All.Where(pack => pack.Enabled && pack.Lines is { Count: > 0 }).SelectMany(pack => pack.Lines!.Select(lines => (pack, lines))).ToArray();
         if (libraries.Length == 0)
         {
-            page.Children.Add(new TextBlock { Text = "还没有扩展带台词。", FontSize = 12, Foreground = new SolidColorBrush(Color.FromRgb(120, 126, 148)) });
+            page.Children.Add(new TextBlock { Text = "暂无扩展提供台词。", FontSize = 12, Foreground = new SolidColorBrush(Color.FromRgb(120, 126, 148)) });
         }
         foreach (var (pack, lines) in libraries)
         {
@@ -278,7 +278,7 @@ internal sealed class SettingsWindow : Window
             {
                 box.Children.Add(new TextBlock
                 {
-                    Text = string.Join(Environment.NewLine, lines.Items.Take(3).Select(text => "· " + text)) + (lines.Count > 3 ? Environment.NewLine + "…… 还有 " + (lines.Count - 3) + " 条" : ""),
+                    Text = string.Join(Environment.NewLine, lines.Items.Take(3).Select(text => "· " + text)) + (lines.Count > 3 ? Environment.NewLine + "…… 另有 " + (lines.Count - 3) + " 条" : ""),
                     TextWrapping = TextWrapping.Wrap, FontSize = 11, Margin = new Thickness(10, 2, 0, 0),
                     Foreground = new SolidColorBrush(Color.FromRgb(120, 126, 148)),
                 });
@@ -320,7 +320,7 @@ internal sealed class SettingsWindow : Window
         if (pack.LineCount > 0) counts.Add(pack.LineCount + " 条台词");
         stack.Children.Add(new TextBlock
         {
-            Text = counts.Count == 0 ? "这个包是空的（pack.json 里没有 words / moods / lines）。" : "带了 " + string.Join("、", counts),
+            Text = counts.Count == 0 ? "该扩展包为空（pack.json 未包含 words / moods / lines）。" : "包含 " + string.Join("、", counts),
             FontSize = 12, Margin = new Thickness(24, 2, 0, 0), TextWrapping = TextWrapping.Wrap,
             Foreground = new SolidColorBrush(Color.FromRgb(110, 116, 138)),
         });
@@ -394,7 +394,7 @@ internal sealed class SettingsWindow : Window
         page.Children.Add(Group("说话"));
         page.Children.Add(new TextBlock
         {
-            Text = "一次说话最多说多少字。超了不会硬说，退回来让模型压短重说，压出来的必须是完整句子，不会截半句；〔〕里的神情动作不计入。填 0 就是不限。",
+            Text = "一次 say 调用可显示的可见字数上限，多段合计计算，〔〕内的神情动作不计入。超出时本次调用直接失败并返回字数提示，不会自动压缩或截断；设为 0 表示不限。",
             TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = new SolidColorBrush(Color.FromRgb(120, 126, 148)), Margin = new Thickness(0, 2, 0, 4),
         });
         var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 6, 0, 4) };
@@ -413,7 +413,7 @@ internal sealed class SettingsWindow : Window
         page.Children.Add(Group("说过的"));
         page.Children.Add(new TextBlock
         {
-            Text = "她每次在桌面上说的话都记在这里，最新的在最上面；最近两百句留着。",
+            Text = "角色每次在桌面显示的内容都会记录在此，最新记录位于顶部，保留最近两百条。",
             TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = new SolidColorBrush(Color.FromRgb(120, 126, 148)), Margin = new Thickness(0, 2, 0, 4),
         });
         var bar = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 2) };
@@ -427,7 +427,7 @@ internal sealed class SettingsWindow : Window
     }
 
     private void SetSayLimitHint() =>
-        sayLimitHint.Text = settings.SayLimit == 0 ? "现在不限长度。" : "现在一次最多 " + settings.SayLimit + " 字；超了会被退回，不会显示半句话。";
+        sayLimitHint.Text = settings.SayLimit == 0 ? "当前不限长度。" : "当前单次调用最多 " + settings.SayLimit + " 字；超出将直接退回。";
 
     private void ApplySayLimit()
     {
@@ -445,7 +445,7 @@ internal sealed class SettingsWindow : Window
         var entries = Talk.Recent(80);
         if (entries.Count == 0)
         {
-            talkHistory.Children.Add(new TextBlock { Text = "还没有说过话。", FontSize = 12, Foreground = new SolidColorBrush(Color.FromRgb(120, 126, 148)) });
+            talkHistory.Children.Add(new TextBlock { Text = "暂无记录。", FontSize = 12, Foreground = new SolidColorBrush(Color.FromRgb(120, 126, 148)) });
             return;
         }
         foreach (var entry in entries)
@@ -475,7 +475,7 @@ internal sealed class SettingsWindow : Window
         rescan.Click += (_, _) => { adapt.Invalidate(); RefreshModels(); RefreshParts(); };
         row.Children.Add(rescan);
         page.Children.Add(row);
-        modelNote.Text = "模型放在插件的 model 文件夹里（里面有 .model3.json 的才算）。换模型会重新开渲染器，位置、大小、穿戴和设置都不变；上面的适配各模型各一份。";
+        modelNote.Text = "模型需放置于插件的 model 文件夹中（含 .model3.json 的文件才会被识别）。切换模型会重新启动渲染器，窗口位置、尺寸、穿戴与设置保持不变；各模型的适配配置独立保存。";
         page.Children.Add(modelNote);
 
         // local patch (模型适配): 换模型后先看有没有这份适配档；没有就让 agent 来配
@@ -492,14 +492,14 @@ internal sealed class SettingsWindow : Window
         page.Children.Add(Group("这里适配什么"));
         page.Children.Add(new TextBlock
         {
-            Text = "适配的是「动作与差分」页里那六个点击触发：头、脸、手、裙、尾巴、身上。摸头、戳脸这些是照着大肥鱼的表情和手势写的，换成别的模型后要在那边给每个部位挑这个模型自己的差分或动作——点「让 AI 调」让 AI 来配，也可以自己去那页手动改；一个都没配的话，点她身上不会有反应。大肥鱼这套原生模型不用配。",
+            Text = "适配对象为「动作与差分」页中的六个点击触发部位：头、脸、手、裙、尾巴、身上。内置模型已按原有表情与手势配置；更换为其他模型后，需在该页为每个部位指定该模型自身的差分或动作，也可点击「让 AI 调」由 AI 完成配置。未配置的部位点击后不会产生反应。内置模型无需适配。",
             TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = new SolidColorBrush(Color.FromRgb(120, 126, 148)), Margin = new Thickness(0, 4, 0, 6),
         });
 
         page.Children.Add(Group("适配档"));
         page.Children.Add(new TextBlock
         {
-            Text = "每个模型一份，存在插件文件夹的 adapt 文件夹里（<模型名>-<短码>.json），改完自动保存；换回某个模型时自动套用它自己那份。想从头来就点「恢复这个模型的默认适配」。",
+            Text = "每个模型独立一份，保存在插件目录的 adapt 文件夹中（<模型名>-<短码>.json），修改后自动保存；切回某个模型时自动应用其对应配置。如需重置，点击「恢复这个模型的默认适配」。",
             TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = new SolidColorBrush(Color.FromRgb(120, 126, 148)), Margin = new Thickness(0, 4, 0, 6),
         });
         page.Children.Add(RestoreButton("恢复默认样子", restore));
@@ -513,16 +513,16 @@ internal sealed class SettingsWindow : Window
         top.Children.Add(RestoreButton("恢复默认样子", restore));
         top.Children.Add(new TextBlock
         {
-            Text = "  试看完、或者她停在某个动作上时点这里",
+            Text = "  试看结束后，或角色停留在某个动作时点击此处",
             FontSize = 12, VerticalAlignment = VerticalAlignment.Center,
             Foreground = new SolidColorBrush(Color.FromRgb(120, 126, 148)),
         });
         page.Children.Add(top);
 
-        page.Children.Add(Group("点她不同位置时演什么"));
+        page.Children.Add(Group("点击部位对应的动作"));
         page.Children.Add(new TextBlock
         {
-            Text = "原来的样子：头 = 摸头，脸 = 戳脸，手 = 开心，裙 = 护裙，尾巴 = 震惊，身上 = 心虚（只有没配的部位才玩「连点五下挨钢盆」）。下拉改完即时保存、不用点保存；换成差分只放 3.5 秒，换成功作播一遍，选「不动」就只是被她注意到。配了组合的部位下拉会锁住，点「停用」才改回单个触发。",
+            Text = "默认配置：头 = 摸头，脸 = 戳脸，手 = 开心，裙 = 护裙，尾巴 = 震惊，身上 = 心虚（仅未配置部位会触发连点彩蛋）。下拉修改后立即保存；差分持续 3.5 秒，动作播放一遍；选择「不动」表示仅引起角色注意。已配置组合的部位下拉将被锁定，点击「停用」后恢复单个触发。",
             TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = new SolidColorBrush(Color.FromRgb(120, 126, 148)), Margin = new Thickness(0, 4, 0, 2),
         });
         foreach (var (zone, label) in Zones) page.Children.Add(TriggerRow(zone, label));
@@ -530,7 +530,7 @@ internal sealed class SettingsWindow : Window
         page.Children.Add(Group("空闲触发的差分与动作"));
         page.Children.Add(new TextBlock
         {
-            Text = "打勾 = 她闲着的时候可以自己演；权重越大越常被挑中，0 等于不触发。内置小动作是照身体说明里的那些演的，换模型后先在「模型与适配」里指过去；模型的差分放 3.5 秒，动作播一遍再回默认。深夜打哈欠、打瞌睡会自动更频繁。",
+            Text = "选中表示角色空闲时可自行播放；权重越大触发频率越高，权重为 0 表示不触发。内置小动作按身体说明中的动作执行，更换模型后需先在「模型与适配」页完成配置；模型的差分持续 3.5 秒，动作播放一遍后恢复默认。深夜时「打哈欠」与「打瞌睡」会自动提高触发频率。",
             TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = new SolidColorBrush(Color.FromRgb(120, 126, 148)), Margin = new Thickness(0, 4, 0, 2),
         });
         page.Children.Add(parts);
@@ -545,8 +545,8 @@ internal sealed class SettingsWindow : Window
         modelPick.SelectedItem = choices.FirstOrDefault(item => string.Equals(item.Path, now, StringComparison.OrdinalIgnoreCase));
         if (modelPick.SelectedItem == null && choices.Count > 0) modelPick.SelectedIndex = 0;
         modelNote.Text = now == null
-            ? "现在没有找到模型：把模型文件夹放进插件的 model 文件夹里，再点「重新扫描」。"
-            : "现在用的是：" + now;
+            ? "当前未找到模型：请将模型文件夹放入插件的 model 文件夹后，点击「重新扫描」。"
+            : "当前使用：" + now;
         RefreshAdaptStatus();
     }
 
@@ -564,23 +564,23 @@ internal sealed class SettingsWindow : Window
         if (modelPick.SelectedItem is not ModelChoice choice) return;
         if (string.Equals(choice.Path, currentModel(), StringComparison.OrdinalIgnoreCase))
         {
-            modelNote.Text = "已经在用这个模型了：" + choice.Path;
+            modelNote.Text = "当前已在使用该模型：" + choice.Path;
             return;
         }
         switchModel(choice.Path);
-        modelNote.Text = "正在换成：" + choice.Path + "（渲染器要重开，稍等一下）";
+        modelNote.Text = "正在切换：" + choice.Path + "（需要重新启动渲染器，请稍候）";
         RefreshParts();
     }
 
     private void Browse()
     {
-        var dialog = new OpenFileDialog { Title = "选一个 Live2D 模型", Filter = "Live2D 模型 (*.model3.json)|*.model3.json|所有文件 (*.*)|*.*" };
+        var dialog = new OpenFileDialog { Title = "选择 Live2D 模型", Filter = "Live2D 模型 (*.model3.json)|*.model3.json|所有文件 (*.*)|*.*" };
         if (dialog.ShowDialog(this) != true) return;
         var choices = ModelChoices(dialog.FileName);
         modelPick.ItemsSource = choices;
         modelPick.SelectedItem = choices.FirstOrDefault(item => item.Path == dialog.FileName);
         switchModel(dialog.FileName);
-        modelNote.Text = "正在换成：" + dialog.FileName + "（渲染器要重开，稍等一下）";
+        modelNote.Text = "正在切换：" + dialog.FileName + "（需要重新启动渲染器，请稍候）";
         RefreshParts();
     }
 
@@ -618,41 +618,41 @@ internal sealed class SettingsWindow : Window
         if (model == null)
         {
             askAi.Visibility = Visibility.Collapsed;
-            adaptStatus.Text = "还没有模型。";
+            adaptStatus.Text = "尚未选择模型。";
             adaptStatus.Foreground = new SolidColorBrush(Color.FromRgb(120, 126, 148));
             return;
         }
-        // 大肥鱼这一套模型，六个部位原来那套本来就能用，不用适配；换别的模型才要。
+        // 内置模型的六个部位沿用原有配置，无需适配；更换其他模型时才需要。
         bool native = Native(model);
         askAi.Visibility = native ? Visibility.Collapsed : Visibility.Visible;
-        string asked = askedAt == null ? "" : "（已经通知 AI 了，等它来调）";
+        string asked = askedAt == null ? "" : "（已通知 AI，等待处理）";
         if (native)
         {
-            string combos = profile.Combos.Count > 0 ? "（你自己给 " + profile.Combos.Count + " 个部位配了组合）" : "";
-            adaptStatus.Text = "✓ 原生模型，点她六个位置原来那套直接能用，不用适配。" + combos +
+            string combos = profile.Combos.Count > 0 ? "（已为 " + profile.Combos.Count + " 个部位配置组合）" : "";
+            adaptStatus.Text = "✓ 内置模型，六个部位使用原有配置，无需适配。" + combos +
                 (exists ? Environment.NewLine + AdaptFile.Location(model) : "");
             adaptStatus.Foreground = new SolidColorBrush(Color.FromRgb(60, 120, 80));
             return;
         }
         if (!exists)
         {
-            adaptStatus.Text = "⚠ 这个模型的点击触发还没适配（0/6 个部位）——点她身上不会有反应。点「让 AI 调」让 AI 来配，或者自己去「动作与差分」页手动指。" + asked;
+            adaptStatus.Text = "⚠ 该模型的点击触发尚未适配（0/6 个部位）——点击角色不会产生反应。可点击「让 AI 调」由 AI 配置，或前往「动作与差分」页手动指定。" + asked;
             adaptStatus.Foreground = new SolidColorBrush(Color.FromRgb(180, 90, 40));
             return;
         }
         if (!profile.Adapted)
         {
-            adaptStatus.Text = "⚠ 点击触发只配了 " + profile.Covered + "/6 个部位，没配的点下去不会有反应。点「让 AI 调」补全，或者自己去「动作与差分」页手动指。" + asked;
+            adaptStatus.Text = "⚠ 点击触发已配置 " + profile.Covered + "/6 个部位，未配置的部位点击后不会产生反应。可点击「让 AI 调」补全，或前往「动作与差分」页手动指定。" + asked;
             adaptStatus.Foreground = new SolidColorBrush(Color.FromRgb(180, 90, 40));
             return;
         }
-        string who = profile.AdaptedBy == "ai" ? "AI 配的" : "手动配的";
+        string who = profile.AdaptedBy == "ai" ? "由 AI 配置" : "手动配置";
         adaptStatus.Text = "✓ 点击触发已适配（" + who + (profile.AdaptedAt is { } at ? " · " + at.ToString("MM-dd HH:mm") : "") + "）" +
             Environment.NewLine + AdaptFile.Location(model);
         adaptStatus.Foreground = new SolidColorBrush(Color.FromRgb(60, 120, 80));
     }
 
-    // local patch (模型适配): 是不是大肥鱼那套（有它那批表情），是就不用适配。
+    // local patch (模型适配): 是否为内置模型（以内置表情判断），是则无需适配。
     private static bool Native(string? model) => model != null && ModelParts.Expressions(model).Contains("黑框眼镜");
 
     // ---- local patch (模型页): 差分与动作的空闲权重 ----
@@ -664,11 +664,11 @@ internal sealed class SettingsWindow : Window
         string? model = currentModel();
         if (model == null)
         {
-            parts.Children.Add(new TextBlock { Text = "还没有模型，所以没有差分和动作可列。", FontSize = 12, Margin = new Thickness(0, 8, 0, 0), Foreground = new SolidColorBrush(Color.FromRgb(120, 126, 148)) });
+            parts.Children.Add(new TextBlock { Text = "尚未选择模型，暂无可列的差分与动作。", FontSize = 12, Margin = new Thickness(0, 8, 0, 0), Foreground = new SolidColorBrush(Color.FromRgb(120, 126, 148)) });
             RefreshAdaptStatus();
             return;
         }
-        // local patch (模型适配): 内置小动作只有大肥鱼那套模型才有；别的模型只列它自己的差分与动作。
+        // local patch (模型适配): 内置小动作仅内置模型提供；其他模型只列自身的差分与动作。
         if (Native(model)) AddPartGroup("内置小动作", Behavior.IdleNames.Select(name => (Kind: "mood", Name: name)));
         // local patch (扩展包): 扩展带来的表情单独一组，跟内置分开看
         var extended = Behavior.Moods.Keys.Where(name => Extensions.MoodSource.ContainsKey(name)).Order().ToArray();
@@ -687,7 +687,7 @@ internal sealed class SettingsWindow : Window
         string? model = currentModel();
         if (model == null)
         {
-            diffs.Children.Add(new TextBlock { Text = "还没有模型。", FontSize = 12, Foreground = new SolidColorBrush(Color.FromRgb(120, 126, 148)) });
+            diffs.Children.Add(new TextBlock { Text = "尚未选择模型。", FontSize = 12, Foreground = new SolidColorBrush(Color.FromRgb(120, 126, 148)) });
             return;
         }
         var profile = Profile;
@@ -822,7 +822,7 @@ internal sealed class SettingsWindow : Window
         string? model = currentModel();
         if (model != null)
         {
-            // local patch (模型适配): 内置那套反应只有大肥鱼自己有；别的模型只列它自己的差分和动作。
+            // local patch (模型适配): 内置反应仅内置模型提供；其他模型只列自身的差分与动作。
             // local patch (扩展包): 扩展带来的表情注明是哪个包给的
             if (Native(model)) foreach (var name in Behavior.Moods.Keys.Order())
                 triggers.Add(new("mood:" + name, Extensions.MoodSource.TryGetValue(name, out var from) ? "扩展 · " + Extensions.PackName(from) + "：" + name : "内置：" + name));
@@ -1021,7 +1021,7 @@ internal sealed class ComboWindow : Window
         series.Checked += (_, _) => { if (series.IsChecked == true) parallel.IsChecked = false; };
         var note = new TextBlock
         {
-            Text = "「模式」给个默认：并行 = 几条一起开始，连续 = 一个演完再演下一个。每条还能单独定「开始」：跟随模式 / 立即 / 等上一步 / 延迟几秒——几个动作同时请求容易卡，用「等上一步」或「延迟」错开就好。秒数是这一步占多久（差分到点关，动作按文件时长）。一条都不留、直接保存 = 这个部位不用组合。",
+            Text = "「模式」用于设定默认开始方式：并行表示多条同时开始，连续表示前一条结束后再开始下一条。每条动作可单独指定「开始」：跟随模式 / 立即 / 等上一步 / 延迟。多个动作同时请求容易造成卡顿，建议使用「等上一步」或「延迟」错开。秒数表示该步骤持续时间（差分到时间关闭，动作按文件时长播放）。不保留任何条目并直接保存，表示该部位不使用组合。",
             TextWrapping = TextWrapping.Wrap, FontSize = 12, Margin = new Thickness(16, 2, 16, 6),
             Foreground = new SolidColorBrush(Color.FromRgb(120, 126, 148)),
         };

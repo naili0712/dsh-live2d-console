@@ -27,18 +27,6 @@ internal static class Talk
         return seen;
     }
 
-    // 太长的一句排队给桥：由它用模型压短，再写回 say.txt 让她说。
-    internal static void Queue(string text, int limit)
-    {
-        try
-        {
-            Directory.CreateDirectory(Places.Cache);
-            File.WriteAllText(Path.Combine(Places.Cache, "say-queue.json"),
-                JsonSerializer.Serialize(new { limit, text, at = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") }));
-        }
-        catch (Exception error) { Places.Log("排队台词失败：" + error.Message); }
-    }
-
     // 记一句：什么时候、说了什么、几个气泡。
     internal static void Note(string text, int bubbles)
     {

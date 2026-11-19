@@ -382,7 +382,7 @@ internal sealed class PetWindow : Window
         }
         catch (Exception error) { Places.Log("适配请求没能落盘：" + error.Message); }
         Happened("adapt_request", new { model });
-        bubbleStack.Say("好，我去叫 AI 来配一下这个模型点她身上的反应");
+        bubbleStack.Say("正在请求 AI 为该模型的点击部位配置反应。");
     }
 
     // local patch (扩展包): 设置里点了某个包的「扩展适配」——包是按发布时的模型写的，换个模型
@@ -394,7 +394,7 @@ internal sealed class PetWindow : Window
     {
         var pack = Extensions.All.FirstOrDefault(item => item.Id == id);
         if (pack == null) return;
-        if (model == null) { bubbleStack.Say("先选个模型吧，不然不知道要照着谁适配"); return; }
+        if (model == null) { bubbleStack.Say("请先选择模型，否则无法确定适配对象。"); return; }
         packAskedAt = DateTime.UtcNow; packToldAt = null; packAskedId = id;
         try
         {
@@ -419,7 +419,7 @@ internal sealed class PetWindow : Window
         }
         catch (Exception error) { Places.Log("扩展适配请求没能落盘：" + error.Message); }
         Happened("pack_adapt_request", new { id });
-        bubbleStack.Say("好，让 AI 去看看这个包在这个模型上做不做得了，做不了的换成本体能做出来的");
+        bubbleStack.Say("正在请求 AI 检查该扩展包在此模型上的实现情况，无法实现的部分将改用本模型支持的动作。");
     }
 
     private string PackAdaptNotice()
@@ -438,7 +438,7 @@ internal sealed class PetWindow : Window
 
     internal void RequestPackGrab(string inbox, string[] files)
     {
-        if (model == null) { bubbleStack.Say("先选个模型吧，扩展包要照着它有的动作写"); return; }
+        if (model == null) { bubbleStack.Say("请先选择模型，扩展包需按该模型具备的动作编写。"); return; }
         grabAskedAt = DateTime.UtcNow; grabToldAt = null; grabInbox = inbox;
         try
         {
@@ -463,7 +463,7 @@ internal sealed class PetWindow : Window
         }
         catch (Exception error) { Places.Log("扩展获取请求没能落盘：" + error.Message); }
         Happened("pack_grab_request", new { inbox, files });
-        bubbleStack.Say("收到，" + files.Length + " 个素材，我让 AI 去认里面的动作");
+        bubbleStack.Say("已收到 " + files.Length + " 个素材，正在请求 AI 识别其中的动作。");
     }
 
     private string GrabNotice() =>
@@ -707,7 +707,7 @@ internal sealed class PetWindow : Window
         // local patch (模型适配): 换上来先告诉她适配没有（大肥鱼那套原生模型不用配），需要就去设置里叫 AI 调。
         bool native = ModelParts.Expressions(path).Contains("黑框眼镜");
         if (!native && !adapt.Current(path).Adapted)
-            bubbleStack.Say("这个模型点她不同位置还没适配，要叫 AI 来调吗？右键「设置…」→「模型与适配」里有「让 AI 调」");
+            bubbleStack.Say("该模型的部分点击部位尚未配置适配。是否请求 AI 配置？可在右键菜单「设置…」→「模型与适配」中使用「让 AI 调」。");
     }
 
     private void Restart()
@@ -725,11 +725,11 @@ internal sealed class PetWindow : Window
 
     private void Start()
     {
-        if (model == null) { Trouble("没找到模型：把模型文件夹放进插件的 model 文件夹里，再在设置 → 模型与空闲里选一个。"); return; }
-        if (!File.Exists(Places.Renderer)) { Trouble("没找到渲染程序：先运行插件里的 setup.ps1 编译它。"); return; }
+        if (model == null) { Trouble("未找到模型：请将模型文件夹放入插件的 model 文件夹，并在设置 → 模型与适配中选择一个。"); return; }
+        if (!File.Exists(Places.Renderer)) { Trouble("未找到渲染程序：请先运行插件中的 setup.ps1 进行编译。"); return; }
         var started = new Player(image);
         started.Ready += Ready;
-        started.Failed += message => Trouble("渲染出问题了：" + message);
+        started.Failed += message => Trouble("渲染失败：" + message);
         player = started;
         lastLeft = Left; lastTop = Top;
         var dpi = VisualTreeHelper.GetDpi(this);
@@ -1030,19 +1030,19 @@ internal sealed class PetWindow : Window
 
     private List<(string Label, Action? Run)> MenuItems()
     {
-        var items = new List<(string Label, Action? Run)> { ("跟她说句话…", OpenChat), ("-", null) };
+        var items = new List<(string Label, Action? Run)> { ("输入文字…", OpenChat), ("-", null) };
         foreach (var shape in Shape.All)
         {
             var id = shape.Id;
             items.Add(((shape.Id == Shape.Id ? "✓ " : "   ") + shape.Label, () => SetShape(id)));
         }
         items.Add(("-", null));
-        items.Add(("大一点", () => Zoom(.05)));
-        items.Add(("小一点", () => Zoom(-.05)));
+        items.Add(("放大", () => Zoom(.05)));
+        items.Add(("缩小", () => Zoom(-.05)));
         items.Add(("-", null));
         items.Add(((settings.LockPosition ? "✓ " : "   ") + "锁定位置（点击不会变成拖动）", ToggleLock));
         items.Add(("设置…", OpenSettings));
-        items.Add(("先歇着", HideToTray));
+        items.Add(("隐藏", HideToTray));
         items.Add(("退出", QuitForGood));
         return items;
     }
@@ -1100,7 +1100,7 @@ internal sealed class PetWindow : Window
         }
         catch (Exception error) { Places.Log("聊天记录没能落盘：" + error.Message); }
         unreadChat++;
-        tray?.Hint("dshlive2d控制台（有 " + unreadChat + " 句新话）");
+        tray?.Hint("dshlive2d控制台（有 " + unreadChat + " 条新消息）");
     }
 
     private void Happened(string kind, object detail)
@@ -1380,7 +1380,7 @@ internal sealed class PetWindow : Window
             player?.Send("pause 1");
             Hide();
         }
-        tray?.Hint("dshlive2d控制台（收起来了，双击叫我出来）");
+        tray?.Hint("dshlive2d控制台（已隐藏，双击图标可恢复显示）");
     }
 
     private void ShowFromTray()
@@ -1462,9 +1462,8 @@ internal sealed class PetWindow : Window
         acting.AddRange(lines.Select(Body.ActsWithin));
         if (acting.Count > 10) acting.RemoveRange(0, acting.Count - 10);
         var unread = Body.Unread(string.Join("\n", lines));
-        var missed = unread.Count == 0 ? "" : "身体没跟上：" + string.Join("、", unread.Select(item => "〔" + item.Word + "〕" + (item.Like != null ? "（想写的是〔" + item.Like + "〕？）" : ""))) +
-            "，" + (unread.Count > 1 ? "这几个" : "这个") + "没做出来。";
-        return missed + (Body.NeedsActing(acting) ? "下次说之前，在心里把这几句演一遍：说到哪儿脸和身子怎么变，就在哪儿写〔〕。" : "");
+        var missed = unread.Count == 0 ? "" : "以下动作未能执行：" + string.Join("、", unread.Select(item => "〔" + item.Word + "〕" + (item.Like != null ? "（是否想写〔" + item.Like + "〕？）" : ""))) + "。";
+        return missed + (Body.NeedsActing(acting) ? "下次发言前，请先在心里预演这些句子，并在神情与动作发生处写〔〕。" : "");
     }
 
     private static string UpdateNotice(Updates.Found found) =>
@@ -1482,19 +1481,10 @@ internal sealed class PetWindow : Window
             case "say":
                 var text = Tools.RequiredText(args, "text");
                 var audio = Tools.OptionalText(args, "audio");
-                // local patch (说话页): 超过设置里的上限就排队给桥——桥用模型压短后再让她说，不截半句。
-                if (settings.SayLimit > 0 && Talk.Count(text) > settings.SayLimit)
-                {
-                    var chars = Talk.Count(text);
-                    Talk.Queue(text, settings.SayLimit);
-                    return Tools.Text(new
-                    {
-                        queued = true,
-                        chars,
-                        limit = settings.SayLimit,
-                        note = "这句 " + chars + " 字，超过上限 " + settings.SayLimit + "；已经交给桥用模型压短，压好她会自己说。这次不用重说。",
-                    });
-                }
+                // local patch (字数上限): 超限直接拒绝本次调用，由调用方拆句；不再交给桥压缩。
+                var chars = Talk.Count(text);
+                if (settings.SayLimit > 0 && chars > settings.SayLimit)
+                    throw new ArgumentException("一次调用最多 " + settings.SayLimit + " 个可见字（多行合计，〔〕内不计）；当前 " + chars + " 字。请拆成多次调用，每次一句。");
                 // A line each, in turn; the call returns once the first has begun, the rest wait their turn whoever
                 // asked. A recording is one utterance, so with one it is a single bubble.
                 var bubbles = audio != null ? [text] : Line.Split(text);
@@ -1577,7 +1567,7 @@ internal sealed class PetWindow : Window
                     .Select(item => new { sequence = item.Sequence, secondsAgo = (int)(DateTime.UtcNow - item.At).TotalSeconds, kind = item.Kind, detail = item.Detail }).ToArray());
             case "quit":
                 _ = Dispatcher.BeginInvoke(new Action(HideToTray)); // local patch (托盘): 收进托盘，随时能叫回来
-                return Tools.Text(new { leaving = true, hidden = true, howBack = "托盘的「叫她出来」、再启动一次 FishPet.exe，或任何一次工具调用" });
+                return Tools.Text(new { leaving = true, hidden = true, howBack = "托盘的「显示角色」、再次启动 FishPet.exe，或任意一次工具调用" });
             default:
                 throw new ArgumentException("没有这个工具。");
         }

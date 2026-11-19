@@ -14,7 +14,7 @@ internal sealed class PetTray : IDisposable
     {
         this.show = show;
         var menu = new ContextMenuStrip { ShowImageMargin = false };
-        menu.Items.Add("叫她出来", null, (_, _) => show());
+        menu.Items.Add("显示角色", null, (_, _) => show());
         menu.Items.Add("设置…", null, (_, _) => settings());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("退出", null, (_, _) => quit());

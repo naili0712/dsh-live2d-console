@@ -159,13 +159,13 @@ public sealed class ControlServer : IDisposable
                 var version = args.TryGetProperty("protocolVersion", out var requested) && requested.GetString() == "2025-03-26" ? "2025-03-26" : "2025-11-25";
                 Result(id, new { protocolVersion = version, capabilities = new { tools = new { listChanged = false }, logging = new { }, resources = new { subscribe = true, listChanged = false } },
                     serverInfo = new { name = "FishPet", version = typeof(ControlServer).Assembly.GetName().Version!.ToString(3) },
-                    instructions = "这是你在用户桌面上的身体（大肥鱼 Live2D 形象）。你每次回用户，都用 say 在桌面上把话说出来：要说的几句先想好，一次发出去，一行一个气泡，神情和动作写在〔〕里，" +
-                        "不用等用户提醒，也不是只在用户要你表演时才用；代码、表格、长说明留在聊天窗口，桌面上用一两句口语说要点。〔〕里的词和规矩见 " + Tools.BodyGuide +
-                        "。用户让你 quit 收起身体后，就只在聊天窗口说。照镜子用 look_in_mirror，回头看自己说话时的样子用 look_back，换装用 dress，看东西时戴眼镜用 set_activity，" +
-                        "读改设置用 get_state / update_settings。用户点你、拖你会被记下来：用 recent_events 读，也会以 notifications/message（logger 为 fishpet.events）推送。" +
-                        // local patch (桌上对话): 让 agent 知道她头顶那个输入框。
-                        "用户也可以中键点她、或者右键选「跟她说句话…」，在她头顶的输入框里直接打字：那句话以 user_says 事件给你（recent_events 读得到），该回就回。" +
-                        "点和拖的反应身体自己会做，你只需要决定要不要接一句话。" });
+                    instructions = "这是你在用户桌面上的身体（Live2D 形象）。每次回复用户都应使用 say 将内容显示在桌面上：一次调用先说好要说的话，一句一行，神情与动作写在〔〕中；" +
+                        "无需等待用户提醒，也不必仅在用户要求表演时使用。代码、表格与长篇说明保留在聊天窗口，桌面仅用一两句说明要点。〔〕中的用词与规则见 " + Tools.BodyGuide +
+                        "。用户要求 quit 收起身体后，仅在聊天窗口回话。照镜子使用 look_in_mirror，回看说话时的样子使用 look_back，换装使用 dress，专注任务时使用 set_activity，" +
+                        "读写设置使用 get_state / update_settings。用户的点击与拖动会被记录：可用 recent_events 读取，也会以 notifications/message（logger 为 fishpet.events）推送。" +
+                        // local patch (桌上对话): 让 agent 知道角色头顶的输入框。
+                        "用户也可中键点击角色，或在右键菜单中选择「输入文字…」，在角色头顶输入框中直接输入文字。该内容以 user_says 事件提供（recent_events 可读取），建议及时回应。" +
+                        "点击与拖动的反应由身体自动执行，你只需决定是否回应。" });
                 return Task.CompletedTask;
             }
             if (method == "ping") { Result(id, new { }); return Task.CompletedTask; }

@@ -29,7 +29,7 @@ internal sealed class ChatWindow : Window
         Topmost = true; ShowInTaskbar = false; ShowActivated = true;
         var hint = new TextBlock
         {
-            Text = "回车交给她 · Esc 收起", FontSize = 11, Margin = new Thickness(2, 5, 2, 0),
+            Text = "回车发送 · Esc 关闭", FontSize = 11, Margin = new Thickness(2, 5, 2, 0),
             Foreground = new SolidColorBrush(Color.FromRgb(122, 128, 150)),
         };
         Content = new Bubble { MaxWidth = 320, Child = new StackPanel { Children = { box, hint } } };

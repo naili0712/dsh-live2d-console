@@ -28,7 +28,7 @@ internal sealed class GrabWindow : Window
     internal GrabWindow(Action<string, string[]> handOver)
     {
         this.handOver = handOver;
-        Title = "获取扩展 · 把素材交给 AI 认动作";
+        Title = "获取扩展 · 由 AI 识别素材中的动作";
         Width = 580; Height = 480;
         WindowStyle = WindowStyle.SingleBorderWindow;
         ResizeMode = ResizeMode.CanResize;
@@ -41,12 +41,12 @@ internal sealed class GrabWindow : Window
         var page = new StackPanel { Margin = new Thickness(18) };
         page.Children.Add(new TextBlock
         {
-            Text = "把素材拖进来——视频、录屏、截图都行。",
+            Text = "将素材拖入此处，支持视频、录屏与截图。",
             FontSize = 15, FontWeight = FontWeights.SemiBold, Foreground = new SolidColorBrush(Color.FromRgb(50, 56, 84)),
         });
         page.Children.Add(new TextBlock
         {
-            Text = "AI 会看这些素材，把里面的动作、表情认出来，写成扩展包放进 extensions 里；认得出来的她当场就能用，这个模型做不了的会标成「需要别的模型」。这步要花点时间（它得逐段看视频）。",
+            Text = "AI 会分析这些素材，识别其中的动作与表情并生成扩展包，存放到 extensions 目录。可识别的动作会立即生效；当前模型无法实现的会标注为「需要其他模型」。该过程需要一定时间（需逐段分析视频）。",
             TextWrapping = TextWrapping.Wrap, FontSize = 12, Margin = new Thickness(0, 4, 0, 10),
             Foreground = new SolidColorBrush(Color.FromRgb(120, 126, 148)),
         });
@@ -60,7 +60,7 @@ internal sealed class GrabWindow : Window
         var inside = new StackPanel { VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center };
         inside.Children.Add(new TextBlock
         {
-            Text = "把文件拖到这里", FontSize = 14, HorizontalAlignment = HorizontalAlignment.Center,
+            Text = "将文件拖到这里", FontSize = 14, HorizontalAlignment = HorizontalAlignment.Center,
             Foreground = new SolidColorBrush(Color.FromRgb(110, 116, 138)),
         });
         inside.Children.Add(new TextBlock
@@ -68,7 +68,7 @@ internal sealed class GrabWindow : Window
             Text = "视频 / 图片 / 文件夹", FontSize = 11, Margin = new Thickness(0, 6, 0, 0), HorizontalAlignment = HorizontalAlignment.Center,
             Foreground = new SolidColorBrush(Color.FromRgb(150, 156, 178)),
         });
-        var browse = new Button { Content = "或者点这里选文件", Padding = new Thickness(14, 3, 14, 3), Margin = new Thickness(0, 10, 0, 0), HorizontalAlignment = HorizontalAlignment.Center };
+        var browse = new Button { Content = "或点击此处选择文件", Padding = new Thickness(14, 3, 14, 3), Margin = new Thickness(0, 10, 0, 0), HorizontalAlignment = HorizontalAlignment.Center };
         browse.Click += (_, _) => Pick();
         inside.Children.Add(browse);
         drop.Child = inside;
@@ -90,10 +90,10 @@ internal sealed class GrabWindow : Window
         page.Children.Add(status);
 
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
-        var cancel = new Button { Content = "先不弄了", Padding = new Thickness(18, 4, 18, 4), Margin = new Thickness(0, 0, 8, 0) };
+        var cancel = new Button { Content = "取消", Padding = new Thickness(18, 4, 18, 4), Margin = new Thickness(0, 0, 8, 0) };
         cancel.Click += (_, _) => Close();
         buttons.Children.Add(cancel);
-        send = new Button { Content = "交给 AI 分析", Padding = new Thickness(18, 4, 18, 4), IsEnabled = false };
+        send = new Button { Content = "提交 AI 分析", Padding = new Thickness(18, 4, 18, 4), IsEnabled = false };
         send.Click += (_, _) => Hand();
         buttons.Children.Add(send);
         page.Children.Add(buttons);
@@ -148,8 +148,8 @@ internal sealed class GrabWindow : Window
         if (chosen.Count > 20)
             listing.Children.Add(new TextBlock { Text = "…… 还有 " + (chosen.Count - 20) + " 个", FontSize = 11, Foreground = Brushes.Gray });
         status.Text = chosen.Count == 0
-            ? "还没选素材。"
-            : "选了 " + chosen.Count + " 个" + (added > 0 ? "（刚加了 " + added + " 个）" : "") + "。点「交给 AI 分析」，它会复制一份到插件的 workspace\\pack-inbox 里再开始认。";
+            ? "尚未选择素材。"
+            : "已选择 " + chosen.Count + " 个" + (added > 0 ? "（本次新增 " + added + " 个）" : "") + "。点击「提交 AI 分析」后，将复制一份到插件的 workspace\\pack-inbox 目录并开始识别。";
         send.IsEnabled = chosen.Count > 0;
     }
 
@@ -164,7 +164,7 @@ internal sealed class GrabWindow : Window
     {
         if (chosen.Count == 0) return;
         send.IsEnabled = false;
-        status.Text = "正在复制素材……（大视频要一会儿）";
+        status.Text = "正在复制素材……（较大的视频需要较长时间）";
         string inbox = Path.Combine(Places.Root, "workspace", "pack-inbox", DateTime.Now.ToString("yyyyMMdd-HHmmss"));
         var copies = new List<string>();
         try
@@ -188,7 +188,7 @@ internal sealed class GrabWindow : Window
             return;
         }
         handOver(inbox, copies.ToArray());
-        status.Text = "交出去了。AI 认完会在「扩展包」页里出现新的包，你到时候点「重新扫描」就能看到。";
+        status.Text = "已提交。AI 识别完成后会在「扩展包」页出现新的扩展包，届时点击「重新扫描」即可查看。";
         await Task.Delay(1200);
         Close();
     }
