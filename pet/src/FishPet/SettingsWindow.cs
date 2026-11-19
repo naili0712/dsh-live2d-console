@@ -221,7 +221,8 @@ internal sealed class SettingsWindow : Window
         page.Children.Add(Group("装着的扩展"));
         page.Children.Add(new TextBlock
         {
-            Text = "每个扩展是一个文件夹，放在插件目录的 extensions 里，里面一个 pack.json 写它带了什么：动作词（〔〕里能写的）、表情（点她和闲着时演的）、台词（内容库）。内置那套永远优先，扩展只补它没占的名字；两个扩展抢同一个名字，按文件夹名排前面的赢。装好后重新扫描，动作与差分页里就会多出它们的选项，并注明是哪个包带来的。",
+            Text = "每个扩展是一个文件夹，放在插件目录的 extensions 里，里面一个 pack.json 写它带了什么：动作词（〔〕里能写的）、表情（点她和闲着时演的）、台词（内容库）。内置那套永远优先，扩展只补它没占的名字；两个扩展抢同一个名字，按文件夹名排前面的赢。装好后重新扫描，动作与差分页里就会多出它们的选项，并注明是哪个包带来的。" +
+                   Environment.NewLine + "包是按发布时的那个模型写的——换到这个模型上它不一定做得出同样的动作，点那个包的「扩展适配」，让 AI 读模型本身改写一份适配层（原包不动）。手边没有现成的包，就点「获取扩展」，把视频或素材拖进去，让 AI 认里面的动作再写成包。",
             TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = new SolidColorBrush(Color.FromRgb(120, 126, 148)), Margin = new Thickness(0, 2, 0, 6),
         });
         var bar = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 8) };
