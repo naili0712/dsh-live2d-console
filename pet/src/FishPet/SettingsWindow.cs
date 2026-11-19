@@ -160,6 +160,11 @@ internal sealed class SettingsWindow : Window
         tabs.Items.Add(new TabItem { Header = "动作与差分", Content = new ScrollViewer { Content = BuildPartsPage(), VerticalScrollBarVisibility = ScrollBarVisibility.Auto } });
         // local patch (说话页): 字数上限与她说过的每一句
         tabs.Items.Add(new TabItem { Header = "说话与交流", Content = new ScrollViewer { Content = BuildTalkPage(), VerticalScrollBarVisibility = ScrollBarVisibility.Auto } });
+        // local patch (扩展包): 装了扩展、或者装过但全停用了，才多这一页
+        if (Extensions.All.Count > 0)
+        {
+            tabs.Items.Add(new TabItem { Header = "扩展包", Content = new ScrollViewer { Content = BuildPacksPage(), VerticalScrollBarVisibility = ScrollBarVisibility.Auto } });
+        }
 
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(18, 10, 18, 14) };
         var close = new Button { Content = "关闭", Padding = new Thickness(22, 5, 22, 5) };
@@ -203,6 +208,152 @@ internal sealed class SettingsWindow : Window
         var button = new Button { Content = text, Padding = new Thickness(16, 4, 16, 4), HorizontalAlignment = HorizontalAlignment.Left };
         button.Click += (_, _) => run();
         return button;
+    }
+
+    // ---- local patch (扩展包): 装进来的动作与内容 ----
+
+    private UIElement BuildPacksPage()
+    {
+        var page = new StackPanel { Margin = new Thickness(18) };
+        page.Children.Add(Group("装着的扩展"));
+        page.Children.Add(new TextBlock
+        {
+            Text = "每个扩展是一个文件夹，放在插件目录的 extensions 里，里面一个 pack.json 写它带了什么：动作词（〔〕里能写的）、表情（点她和闲着时演的）、台词（内容库）。内置那套永远优先，扩展只补它没占的名字；两个扩展抢同一个名字，按文件夹名排前面的赢。装好后重新扫描，动作与差分页里就会多出它们的选项，并注明是哪个包带来的。",
+            TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = new SolidColorBrush(Color.FromRgb(120, 126, 148)), Margin = new Thickness(0, 2, 0, 6),
+        });
+        var bar = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 8) };
+        bar.Children.Add(RestoreButton("打开扩展文件夹", OpenPacksFolder));
+        var again = new Button { Content = "重新扫描", Padding = new Thickness(16, 4, 16, 4), Margin = new Thickness(8, 0, 0, 0) };
+        again.Click += (_, _) => ReloadExtensions();
+        bar.Children.Add(again);
+        page.Children.Add(bar);
+
+        if (Extensions.All.Count == 0)
+        {
+            page.Children.Add(new TextBlock { Text = "还没有装扩展。把扩展包文件夹放进 extensions 里，再点「重新扫描」。", FontSize = 12, Foreground = new SolidColorBrush(Color.FromRgb(120, 126, 148)) });
+        }
+        foreach (var pack in Extensions.All) page.Children.Add(PackRow(pack));
+
+        if (Extensions.Skipped.Count > 0)
+        {
+            page.Children.Add(Group("同名没装上的"));
+            page.Children.Add(new TextBlock
+            {
+                Text = string.Join("、", Extensions.Skipped.Select(pair => pair.Key + "（被 " + Extensions.PackName(pair.Value) + " 占了）")),
+                TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = new SolidColorBrush(Color.FromRgb(180, 90, 40)), Margin = new Thickness(0, 2, 0, 4),
+            });
+        }
+        if (Extensions.LastError is { } trouble)
+        {
+            page.Children.Add(new TextBlock { Text = "⚠ " + trouble, TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = new SolidColorBrush(Color.FromRgb(180, 90, 40)), Margin = new Thickness(0, 6, 0, 0) });
+        }
+
+        page.Children.Add(Group("内容库"));
+        page.Children.Add(new TextBlock
+        {
+            Text = "扩展带来的台词按种类合在一起：待机嘀咕（mutter）、小剧场（skit）、首次出场（welcome）、事件反应（event）。这一版先把它们收进来登记、能看有多少条；什么时候挑哪一句来说，留给下一版接。",
+            TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = new SolidColorBrush(Color.FromRgb(120, 126, 148)), Margin = new Thickness(0, 2, 0, 6),
+        });
+        var libraries = Extensions.All.Where(pack => pack.Enabled && pack.Lines is { Count: > 0 }).SelectMany(pack => pack.Lines!.Select(lines => (pack, lines))).ToArray();
+        if (libraries.Length == 0)
+        {
+            page.Children.Add(new TextBlock { Text = "还没有扩展带台词。", FontSize = 12, Foreground = new SolidColorBrush(Color.FromRgb(120, 126, 148)) });
+        }
+        foreach (var (pack, lines) in libraries)
+        {
+            var box = new StackPanel { Margin = new Thickness(0, 4, 0, 8) };
+            box.Children.Add(new TextBlock
+            {
+                Text = lines.Label + "  ·  " + lines.Count + " 条  ·  来自 " + pack.Title,
+                FontSize = 12, Foreground = new SolidColorBrush(Color.FromRgb(50, 56, 84)),
+            });
+            if (lines.Count > 0)
+            {
+                box.Children.Add(new TextBlock
+                {
+                    Text = string.Join(Environment.NewLine, lines.Items.Take(3).Select(text => "· " + text)) + (lines.Count > 3 ? Environment.NewLine + "…… 还有 " + (lines.Count - 3) + " 条" : ""),
+                    TextWrapping = TextWrapping.Wrap, FontSize = 11, Margin = new Thickness(10, 2, 0, 0),
+                    Foreground = new SolidColorBrush(Color.FromRgb(120, 126, 148)),
+                });
+            }
+            page.Children.Add(box);
+        }
+        return page;
+    }
+
+    private FrameworkElement PackRow(ExtensionPack pack)
+    {
+        var box = new Border
+        {
+            BorderBrush = new SolidColorBrush(Color.FromRgb(226, 222, 212)), BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(8), Padding = new Thickness(12, 8, 12, 8), Margin = new Thickness(0, 4, 0, 6),
+            Background = new SolidColorBrush(Color.FromRgb(255, 253, 249)),
+        };
+        var stack = new StackPanel();
+        var head = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+        var on = new CheckBox { IsChecked = pack.Enabled, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) };
+        on.Checked += (_, _) => SetPackEnabled(pack.Id, true);
+        on.Unchecked += (_, _) => SetPackEnabled(pack.Id, false);
+        head.Children.Add(on);
+        head.Children.Add(new TextBlock
+        {
+            Text = pack.Title, FontWeight = FontWeights.SemiBold, FontSize = 13,
+            VerticalAlignment = VerticalAlignment.Center, Foreground = new SolidColorBrush(Color.FromRgb(50, 56, 84)),
+        });
+        if (!string.IsNullOrWhiteSpace(pack.Version))
+            head.Children.Add(new TextBlock { Text = "  v" + pack.Version, FontSize = 11, VerticalAlignment = VerticalAlignment.Center, Foreground = new SolidColorBrush(Color.FromRgb(140, 146, 168)) });
+        if (!string.IsNullOrWhiteSpace(pack.Author))
+            head.Children.Add(new TextBlock { Text = "  ·  " + pack.Author, FontSize = 11, VerticalAlignment = VerticalAlignment.Center, Foreground = new SolidColorBrush(Color.FromRgb(140, 146, 168)) });
+        stack.Children.Add(head);
+
+        var counts = new List<string>();
+        if (pack.WordCount > 0) counts.Add(pack.WordCount + " 个动作词");
+        if (pack.ComboCount > 0) counts.Add(pack.ComboCount + " 个组合词");
+        if (pack.MoodCount > 0) counts.Add(pack.MoodCount + " 个表情");
+        if (pack.LineCount > 0) counts.Add(pack.LineCount + " 条台词");
+        stack.Children.Add(new TextBlock
+        {
+            Text = counts.Count == 0 ? "这个包是空的（pack.json 里没有 words / moods / lines）。" : "带了 " + string.Join("、", counts),
+            FontSize = 12, Margin = new Thickness(24, 2, 0, 0), TextWrapping = TextWrapping.Wrap,
+            Foreground = new SolidColorBrush(Color.FromRgb(110, 116, 138)),
+        });
+        if (!string.IsNullOrWhiteSpace(pack.Describe))
+            stack.Children.Add(new TextBlock { Text = pack.Describe, FontSize = 11, Margin = new Thickness(24, 2, 0, 0), TextWrapping = TextWrapping.Wrap, Foreground = new SolidColorBrush(Color.FromRgb(140, 146, 168)) });
+        if (!string.IsNullOrWhiteSpace(pack.Source))
+            stack.Children.Add(new TextBlock { Text = pack.Source, FontSize = 11, Margin = new Thickness(24, 2, 0, 0), Foreground = new SolidColorBrush(Color.FromRgb(120, 140, 190)) });
+        if (pack.Error is { } error)
+            stack.Children.Add(new TextBlock { Text = "⚠ " + error, FontSize = 11, Margin = new Thickness(24, 2, 0, 0), TextWrapping = TextWrapping.Wrap, Foreground = new SolidColorBrush(Color.FromRgb(180, 90, 40)) });
+        var open = new Button { Content = "打开这个包", Padding = new Thickness(12, 2, 12, 2), Margin = new Thickness(24, 6, 0, 0), HorizontalAlignment = HorizontalAlignment.Left };
+        open.Click += (_, _) => OpenFolder(pack.Folder);
+        stack.Children.Add(open);
+        box.Child = stack;
+        return box;
+    }
+
+    private void SetPackEnabled(string id, bool on)
+    {
+        Extensions.SetEnabled(id, on);
+        ReloadExtensions();
+    }
+
+    private void ReloadExtensions()
+    {
+        Extensions.Reload();
+        Body.UseExtraWords(Extensions.Words, Extensions.Expansions);
+        Behavior.UseExtraMoods(Extensions.Moods);
+        RefreshParts();
+    }
+
+    private void OpenPacksFolder()
+    {
+        try { Directory.CreateDirectory(Extensions.Folder); } catch { }
+        OpenFolder(Extensions.Folder);
+    }
+
+    private static void OpenFolder(string folder)
+    {
+        try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", "\"" + folder + "\"") { UseShellExecute = false })?.Dispose(); }
+        catch (Exception error) { Places.Log("打不开文件夹：" + error.Message); }
     }
 
     // ---- local patch (说话页): 字数上限与台词历史 ----
@@ -489,6 +640,9 @@ internal sealed class SettingsWindow : Window
         }
         // local patch (模型适配): 内置小动作只有大肥鱼那套模型才有；别的模型只列它自己的差分与动作。
         if (Native(model)) AddPartGroup("内置小动作", Behavior.IdleNames.Select(name => (Kind: "mood", Name: name)));
+        // local patch (扩展包): 扩展带来的表情单独一组，跟内置分开看
+        var extended = Behavior.Moods.Keys.Where(name => Extensions.MoodSource.ContainsKey(name)).Order().ToArray();
+        if (Native(model) && extended.Length > 0) AddPartGroup("扩展表情", extended.Select(name => (Kind: "mood", Name: name)));
         AddPartGroup("差分", ModelParts.Expressions(model).Select(name => (Kind: "exp", Name: name)));
         AddPartGroup("动作", ModelParts.Motions(model).Select(name => (Kind: "motion", Name: name)));
         foreach (var (zone, _) in Zones) UpdateCombo(zone);
@@ -639,7 +793,9 @@ internal sealed class SettingsWindow : Window
         if (model != null)
         {
             // local patch (模型适配): 内置那套反应只有大肥鱼自己有；别的模型只列它自己的差分和动作。
-            if (Native(model)) foreach (var name in Behavior.Moods.Keys.Order()) triggers.Add(new("mood:" + name, "内置：" + name));
+            // local patch (扩展包): 扩展带来的表情注明是哪个包给的
+            if (Native(model)) foreach (var name in Behavior.Moods.Keys.Order())
+                triggers.Add(new("mood:" + name, Extensions.MoodSource.TryGetValue(name, out var from) ? "扩展 · " + Extensions.PackName(from) + "：" + name : "内置：" + name));
             foreach (var name in ModelParts.Expressions(model)) triggers.Add(new("exp:" + name, "差分：" + name));
             foreach (var name in ModelParts.Motions(model)) triggers.Add(new("motion:" + name, "动作：" + name));
         }
@@ -686,7 +842,7 @@ internal sealed class SettingsWindow : Window
         };
         var kindText = new TextBlock
         {
-            Text = kind switch { "mood" => "内置", "exp" => "差分", _ => "动作" },
+            Text = kind switch { "mood" => Extensions.MoodSource.ContainsKey(name) ? "扩展" : "内置", "exp" => "差分", _ => "动作" },
             Width = 40, FontSize = 11, VerticalAlignment = VerticalAlignment.Center,
             Foreground = new SolidColorBrush(Color.FromRgb(140, 146, 168)),
         };

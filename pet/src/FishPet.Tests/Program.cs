@@ -6,6 +6,7 @@ void Check(bool condition, string message) { if (!condition) throw new Exception
 VerifyLive2DBehavior();
 VerifyWhatHerBodyTellsHer();
 VerifyUpdateReminders();
+VerifyExtensions();
 Console.WriteLine($"FishPet: {checks} checks passed.");
 
 void VerifyLive2DBehavior()
@@ -397,4 +398,25 @@ void VerifyUpdateReminders()
     Check(updates.Unannounced(start.AddHours(25)) != null && updates.Unannounced(start.AddHours(26)) == null, "told again a day later");
     updates.Latest = updates.Latest! with { Latest = "ccccccc" };
     Check(updates.Unannounced(start.AddHours(26.5)) != null, "a newer one is told at once");
+}
+
+// local patch (扩展包): 装进来的动作词只补内置没占的名字；组合词展开成基础词再做。
+void VerifyExtensions()
+{
+    var sent = new List<string>();
+    Body.UseExtraWords(
+        new Dictionary<string, ExtensionWord>
+        {
+            ["测试低头"] = new() { Word = "测试低头", Channel = "pitch", Hold = [new ExtensionHold { Id = "FaceAngleY", Value = -10 }] },
+            ["微笑"] = new() { Word = "微笑", Channel = "mouth", Hold = [new ExtensionHold { Id = "ParamMouthForm", Value = -9 }] },
+        },
+        new Dictionary<string, string> { ["测试组合"] = "测试低头 微笑" });
+    Check(Body.HasWord("测试低头") && Body.HasWord("测试组合"), "扩展词与组合词都认得");
+    var body = new Body(sent.Add);
+    body.Apply("测试组合");
+    Check(sent.Contains("set FaceAngleY -10"), "组合词展开出扩展基础词");
+    Check(!sent.Contains("set ParamMouthForm -9") && sent.Contains("set ParamMouthForm 1"), "内置词不会被扩展顶掉");
+    Check(Body.Unread("〔测试组合〕").Count == 0, "组合词不算没看懂");
+    Body.UseExtraWords(new Dictionary<string, ExtensionWord>(), new Dictionary<string, string>());
+    Check(!Body.HasWord("测试低头"), "清掉扩展以后名字也就没了");
 }
