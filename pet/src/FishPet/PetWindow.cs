@@ -383,6 +383,92 @@ internal sealed class PetWindow : Window
         bubble.Say("好，我去叫 AI 来配一下这个模型点她身上的反应");
     }
 
+    // local patch (扩展包): 设置里点了某个包的「扩展适配」——包是按发布时的模型写的，换个模型
+    // 它用的参数可能这里根本没有。请 agent 读模型本身，写一份本地适配层（adapt.json），原包不动。
+    private DateTime? packAskedAt, packToldAt;
+    private string? packAskedId;
+
+    internal void RequestPackAdapt(string id)
+    {
+        var pack = Extensions.All.FirstOrDefault(item => item.Id == id);
+        if (pack == null) return;
+        if (model == null) { bubble.Say("先选个模型吧，不然不知道要照着谁适配"); return; }
+        packAskedAt = DateTime.UtcNow; packToldAt = null; packAskedId = id;
+        try
+        {
+            var folder = Path.Combine(Places.Root, "cache");
+            Directory.CreateDirectory(folder);
+            var request = new
+            {
+                requestedAt = DateTime.Now.ToString("s"),
+                model,
+                label = Path.GetFileName(model),
+                cdi = Path.ChangeExtension(model, ".cdi3.json"),
+                pack = new { pack.Id, pack.Name, pack.Version, pack.Author, pack.Folder, pack.Words, pack.Moods },
+                adaptFile = Extensions.AdaptLocation(pack),
+                hasAdapt = pack.Adapt != null,
+                adaptedForThisModel = pack.AdaptedFor,
+                expressions = ModelParts.Expressions(model),
+                motions = ModelParts.Motions(model),
+                howTo = "adapt_pack：read 看这个包和模型实际有的差分/动作；write 往 adapt.json 写这个模型做得到的版本——同名覆盖 pack.json，做不了的列进 disabled；reset 清掉。" +
+                        "参数名不确定就去读模型自己的 cdi 文件（上面 cdi 那个路径）。",
+            };
+            File.WriteAllText(Path.Combine(folder, "pack-adapt-request.json"), JsonSerializer.Serialize(request, new JsonSerializerOptions { WriteIndented = true }));
+        }
+        catch (Exception error) { Places.Log("扩展适配请求没能落盘：" + error.Message); }
+        Happened("pack_adapt_request", new { id });
+        bubble.Say("好，让 AI 去看看这个包在这个模型上做不做得了，做不了的换成本体能做出来的");
+    }
+
+    private string PackAdaptNotice()
+    {
+        var pack = Extensions.All.FirstOrDefault(item => item.Id == packAskedId);
+        return "【用户要你适配扩展包】他刚在设置里点了「扩展适配」，包是「" + (pack?.Title ?? packAskedId) + "」。现在的模型是 " + model + "。" +
+            "包里的动作词是按别的模型（或别的参数名）写的，不一定这台机器能做——先用 adapt_pack 的 read 看包内容和模型实际有哪些差分/动作，" +
+            "再 write 一份 adapt.json：做得到的原样或改成本模型的参数，做不到的放进 disabled，别硬写。" +
+            "请求详情在 " + Path.Combine(Places.Root, "cache", "pack-adapt-request.json") + "；工具列表里还没有 adapt_pack（MCP 没重启）时直接改 " +
+            (pack == null ? "adapt.json" : Extensions.AdaptLocation(pack)) + "。做完用一两句话告诉用户你改了什么、哪些做不了。";
+    }
+
+    // local patch (扩展包): 用户把视频/素材拖进「获取扩展」窗口——记下投递箱，请 agent 去认里面的动作。
+    private DateTime? grabAskedAt, grabToldAt;
+    private string? grabInbox;
+
+    internal void RequestPackGrab(string inbox, string[] files)
+    {
+        if (model == null) { bubble.Say("先选个模型吧，扩展包要照着它有的动作写"); return; }
+        grabAskedAt = DateTime.UtcNow; grabToldAt = null; grabInbox = inbox;
+        try
+        {
+            var folder = Path.Combine(Places.Root, "cache");
+            Directory.CreateDirectory(folder);
+            var request = new
+            {
+                requestedAt = DateTime.Now.ToString("s"),
+                inbox,
+                files,
+                model,
+                label = Path.GetFileName(model),
+                cdi = Path.ChangeExtension(model, ".cdi3.json"),
+                expressions = ModelParts.Expressions(model),
+                motions = ModelParts.Motions(model),
+                packs = Extensions.All.Select(pack => pack.Id).ToArray(),
+                howTo = "照素材认动作，写成新的扩展包放进 extensions 文件夹（pack.json + 可选 adapt.json）。" +
+                        "看视频用 video_storyboard / video_zoom；只提取这台模型做得到的通道与差分，做不到但在素材里确实有的，写进包并在 describe 里注明需要哪类模型。" +
+                        "写完让人在设置里点「重新扫描」。",
+            };
+            File.WriteAllText(Path.Combine(folder, "pack-grab-request.json"), JsonSerializer.Serialize(request, new JsonSerializerOptions { WriteIndented = true }));
+        }
+        catch (Exception error) { Places.Log("扩展获取请求没能落盘：" + error.Message); }
+        Happened("pack_grab_request", new { inbox, files });
+        bubble.Say("收到，" + files.Length + " 个素材，我让 AI 去认里面的动作");
+    }
+
+    private string GrabNotice() =>
+        "【用户要你从素材里做扩展包】他把 " + grabInbox + " 里的素材拖进了「获取扩展」。现在的模型是 " + model + "。" +
+        "先用 video_storyboard（视频）或直接看图，认里面的动作/表情，再写成 extensions/<id>/pack.json。" +
+        "只写这台模型做得出来的（参数名、差分名在 cdi 和 Exp3 里能找到），做不到的写进包并在 describe 里注明。写完让人在设置里点「重新扫描」，并告诉用户新包叫什么。";
+
     // local patch (模型适配): 用户点了让 AI 调，下一个工具调用里把这件事告诉 agent。
     private string AdaptNotice() =>
         "【用户要你适配模型】他刚在设置里点了「让 AI 调」。现在的模型是 " + model + "（" + Path.GetFileName(model ?? "") + "）。" +
@@ -390,6 +476,95 @@ internal sealed class PetWindow : Window
         "先用 adapt_model 的 read 看它有哪些差分和动作，再用 write 的 clicks 给每个部位挑一个（\"exp:名字\"、\"motion:名字\"，或者 \"none\"）；" +
         "工具列表里还没有 adapt_model（新版 MCP 没重启）时，直接改 " + AdaptFile.Location(model ?? "") + " 这份 JSON，clicks 里写 {\"head\":\"exp:名字\"} 这种。" +
         "空闲权重（idle）想调也可以一起写。配完用一两句话告诉用户你怎么配的。";
+
+    // local patch (扩展包): agent 通过这个工具给一个包写「本地适配层」——不动原包，只覆盖、停用、补充。
+    private object AdaptPackTool(JsonElement args)
+    {
+        if (model == null) throw new InvalidOperationException("还没有模型，先在设置里选一个。");
+        string action = args.TryGetProperty("action", out var kind) && kind.ValueKind == JsonValueKind.String ? kind.GetString()! : "read";
+        string? wanted = Tools.OptionalText(args, "id");
+        var pack = wanted != null
+            ? Extensions.All.FirstOrDefault(item => string.Equals(item.Id, wanted, StringComparison.OrdinalIgnoreCase))
+            : Extensions.All.FirstOrDefault(item => item.Id == packAskedId);
+        if (pack == null)
+            throw new ArgumentException("没有这个扩展包。现在装着的是：" + string.Join("、", Extensions.All.Select(item => item.Id)));
+        string path = Extensions.AdaptLocation(pack);
+        if (action == "read")
+            return new
+            {
+                model, label = Path.GetFileName(model),
+                cdi = Path.ChangeExtension(model, ".cdi3.json"),
+                pack = new { pack.Id, pack.Name, pack.Version, pack.Author, pack.Folder },
+                adaptFile = path, adapted = pack.Adapt, adaptedForThisModel = pack.AdaptedFor,
+                words = pack.Words, moods = pack.Moods,
+                expressions = ModelParts.Expressions(model), motions = ModelParts.Motions(model),
+                howTo = "write 时 words 是这个词的完整定义（和 pack.json 里同一种结构）：做得到的原样写回、改成这台模型的参数；" +
+                        "做不到的把名字放进 disabled。参数名在模型自己的 cdi 文件里。",
+            };
+        if (action == "reset")
+        {
+            try { if (File.Exists(path)) File.Delete(path); }
+            catch (Exception error) { throw new InvalidOperationException("删不掉 adapt.json：" + error.Message); }
+            packToldAt = packAskedAt;
+            ReloadPacks();
+            return new { reset = true, adaptFile = path };
+        }
+        if (action != "write") throw new ArgumentException("action 只能是 read、write 或 reset。");
+        var adapt = new ExtensionAdapt { Model = model, AdaptedAt = DateTime.Now.ToString("s"), AdaptedBy = "ai" };
+        var warnings = new List<string>();
+        if (args.TryGetProperty("words", out var words) && words.ValueKind == JsonValueKind.Array)
+        {
+            adapt.Words = [];
+            foreach (var item in words.EnumerateArray())
+            {
+                ExtensionWord? word = null;
+                try { word = JsonSerializer.Deserialize<ExtensionWord>(item.GetRawText(), RelaxedJson); } catch { }
+                if (word == null || string.IsNullOrWhiteSpace(word.Word)) { warnings.Add("有一个词没写名字，跳过了"); continue; }
+                adapt.Words.Add(word);
+            }
+        }
+        if (args.TryGetProperty("moods", out var moods) && moods.ValueKind == JsonValueKind.Array)
+        {
+            adapt.Moods = [];
+            foreach (var item in moods.EnumerateArray())
+            {
+                ExtensionMood? mood = null;
+                try { mood = JsonSerializer.Deserialize<ExtensionMood>(item.GetRawText(), RelaxedJson); } catch { }
+                if (mood == null || string.IsNullOrWhiteSpace(mood.Name)) { warnings.Add("有一个表情没写名字，跳过了"); continue; }
+                adapt.Moods.Add(mood);
+            }
+        }
+        if (args.TryGetProperty("disabled", out var disabled) && disabled.ValueKind == JsonValueKind.Array)
+            adapt.Disabled = disabled.EnumerateArray().Where(item => item.ValueKind == JsonValueKind.String)
+                .Select(item => item.GetString()!.Trim()).Where(name => name.Length > 0).ToList();
+        if (args.TryGetProperty("notes", out var notes) && notes.ValueKind == JsonValueKind.String) adapt.Notes = notes.GetString();
+        try
+        {
+            Directory.CreateDirectory(pack.Folder);
+            File.WriteAllText(path, JsonSerializer.Serialize(adapt, new JsonSerializerOptions
+            {
+                WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+            }));
+        }
+        catch (Exception error) { throw new InvalidOperationException("写不进 adapt.json：" + error.Message); }
+        packToldAt = packAskedAt;
+        ReloadPacks();
+        return new
+        {
+            written = true, adaptFile = path,
+            words = adapt.Words?.Count ?? 0, moods = adapt.Moods?.Count ?? 0, disabled = adapt.Disabled?.Count ?? 0,
+            warnings,
+        };
+    }
+
+    // local patch (扩展包): 适配层或包改了以后，动作词和表情表要跟着重算，设置页也要刷新。
+    internal void ReloadPacks()
+    {
+        Extensions.Reload(model);
+        Body.UseExtraWords(Extensions.Words, Extensions.Expansions);
+        Behavior.UseExtraMoods(Extensions.Moods);
+        settingsWindow?.RefreshPacks();
+    }
 
     // local patch (模型适配): agent 通过这个工具看/写/清当前模型的适配档。
     private object AdaptTool(JsonElement args)
@@ -1145,11 +1320,14 @@ internal sealed class PetWindow : Window
 
     // ---- local patch (设置面板) ----
 
+    // local patch (扩展包): 打开「获取扩展」——拖素材进来，交给 agent 认动作、写新包。
+    internal void OpenGrab() => new GrabWindow(RequestPackGrab).Show();
+
     private void OpenSettings()
     {
         if (settingsWindow is { IsVisible: true }) { settingsWindow.Activate(); return; }
         // local patch (模型页): 设置窗还要能读现在用的模型、换模型、试放一个差分或动作
-        settingsWindow = new SettingsWindow(settings, adapt, ApplySettingsFromWindow, () => model, SwitchModel, PreviewPart, RestoreDefault, RequestAdapt, WearDiff);
+        settingsWindow = new SettingsWindow(settings, adapt, ApplySettingsFromWindow, () => model, SwitchModel, PreviewPart, RestoreDefault, RequestAdapt, WearDiff, RequestPackAdapt, OpenGrab);
         settingsWindow.Closed += (_, _) => settingsWindow = null;
         settingsWindow.Show();
     }
@@ -1239,6 +1417,17 @@ internal sealed class PetWindow : Window
         {
             adaptToldAt = asked;
             result = Tools.WithNotice(result, AdaptNotice());
+        }
+        // local patch (扩展包): 点了「扩展适配」/ 拖了素材，下一次工具调用把这件事告诉 agent。
+        if (packAskedAt is { } packAsked && packToldAt != packAsked && DateTime.UtcNow - packAsked < TimeSpan.FromHours(2))
+        {
+            packToldAt = packAsked;
+            result = Tools.WithNotice(result, PackAdaptNotice());
+        }
+        if (grabAskedAt is { } grabAsked && grabToldAt != grabAsked && DateTime.UtcNow - grabAsked < TimeSpan.FromHours(2))
+        {
+            grabToldAt = grabAsked;
+            result = Tools.WithNotice(result, GrabNotice());
         }
         return updates.Unannounced() is { } found ? Tools.WithNotice(result, UpdateNotice(found)) : result;
     }
@@ -1357,6 +1546,8 @@ internal sealed class PetWindow : Window
                 return Tools.Text(new { opened = true });
             case "adapt_model": // local patch (模型适配)
                 return Tools.Text(AdaptTool(args));
+            case "adapt_pack": // local patch (扩展包)
+                return Tools.Text(AdaptPackTool(args));
             case "recent_events":
                 long after = args.TryGetProperty("after", out var since) && since.TryGetInt64(out var mark) ? mark : 0;
                 if (after == 0) { unreadChat = 0; tray?.Hint("dshlive2d控制台"); } // local patch (不丢字): 读过就清掉未读

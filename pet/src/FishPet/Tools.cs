@@ -68,6 +68,12 @@ internal static class Tools
             "worn 是常驻差分（外观页勾的那些，字符串数组，从它自己的差分里挑）；" +
             "idle 的键是 \"mood:名字\"/\"exp:名字\"/\"motion:名字\"，值是 {\"on\":true,\"weight\":1}。",
             """{"action":{"type":"string","enum":["read","write","reset"]},"clicks":{"type":"object"},"combos":{"type":"object"},"worn":{"type":"array"},"idle":{"type":"object"}}""", ["action"]),
+        // local patch (扩展包): 让 agent 给装进来的扩展包写本地适配层
+        Tool("adapt_pack", "给一个扩展包写「本地适配层」（extensions\\<id>\\adapt.json，原包不动）。read 返回这个包的全部动作词和表情、当前模型能用的差分与动作、现有的适配层；" +
+            "write 用 words 写这个模型做得到的版本（结构和 pack.json 里一样：word/expand/channel/hold/overlay/move/clear/reset/handOn/handOff/handDown，同名覆盖原包），" +
+            "做不到的把名字放进 disabled（字符串数组），notes 写清楚为什么改、为什么停用；reset 删掉适配层。" +
+            "用户在设置里点了「扩展适配」，或者包里的词她做不出来时用它。参数名去模型自己的 .cdi3.json 里找；id 不给就用刚请求的那个包。",
+            """{"action":{"type":"string","enum":["read","write","reset"]},"id":{"type":"string"},"words":{"type":"array"},"moods":{"type":"array"},"disabled":{"type":"array"},"notes":{"type":"string"}}""", ["action"]),
         Tool("recent_events", "用户最近怎么碰了你：点了哪里（zone：head 头、face 脸、hand 手、skirt 裙子、tail 尾巴、body 身上）、你的反应（reaction）、拖动和放下；" +
             "user_says 是用户在她头顶的输入框里打给你的话（detail.text），最好马上接一句。" +
             "after 可选：只要这个序号之后的。反应身体自己会做，这里只是让你知道，要不要接一句话由你决定。", """{"after":{"type":"integer","minimum":0}}""", []),

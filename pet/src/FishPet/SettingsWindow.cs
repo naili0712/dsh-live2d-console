@@ -25,6 +25,11 @@ internal sealed class SettingsWindow : Window
     private readonly Action restore;
     // local patch (模型适配): 用户点「让 AI 调」时，请桌宠把请求交给 agent。
     private readonly Action requestAdapt;
+    // local patch (扩展包): 某个包的「扩展适配」和「获取扩展」窗口。
+    private readonly Action<string> requestPackAdapt;
+    private readonly Action openGrab;
+    private TabItem? packsTab;
+    private readonly TabControl tabs = new() { Margin = new Thickness(8, 6, 8, 0), Background = Brushes.Transparent, BorderThickness = new Thickness(0) };
     // local patch (外观差分): 勾/取消一个常驻差分，让桌宠当场发。
     private readonly Action<string, bool> wearDiff;
     private readonly ComboBox shape = new() { Width = 160 };
@@ -78,11 +83,12 @@ internal sealed class SettingsWindow : Window
     private sealed record ModelChoice(string Path, string Label);
     private sealed record TriggerChoice(string Value, string Label);
 
-    internal SettingsWindow(Settings settings, AdaptFile adapt, Action apply, Func<string?> currentModel, Action<string> switchModel, Action<string, string> preview, Action restore, Action requestAdapt, Action<string, bool> wearDiff)
+    internal SettingsWindow(Settings settings, AdaptFile adapt, Action apply, Func<string?> currentModel, Action<string> switchModel, Action<string, string> preview, Action restore, Action requestAdapt, Action<string, bool> wearDiff, Action<string> requestPackAdapt, Action openGrab)
     {
         this.settings = settings; this.adapt = adapt; this.apply = apply;
         this.currentModel = currentModel; this.switchModel = switchModel; this.preview = preview; this.restore = restore;
         this.requestAdapt = requestAdapt; this.wearDiff = wearDiff;
+        this.requestPackAdapt = requestPackAdapt; this.openGrab = openGrab;
         settings.ClickTriggers ??= [];
         Title = "dshlive2d控制台 · 设置";
         WindowStyle = WindowStyle.SingleBorderWindow;
@@ -154,17 +160,14 @@ internal sealed class SettingsWindow : Window
         panel.Children.Add(note);
 
         // local patch (模型页): 三个页签；按钮钉在底部，页签和滚动条各页各的
-        var tabs = new TabControl { Margin = new Thickness(8, 6, 8, 0), Background = Brushes.Transparent, BorderThickness = new Thickness(0) };
+        var tabs = this.tabs;
         tabs.Items.Add(new TabItem { Header = "外观与行为", Content = new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto } });
         tabs.Items.Add(new TabItem { Header = "模型与适配", Content = new ScrollViewer { Content = BuildAdaptPage(), VerticalScrollBarVisibility = ScrollBarVisibility.Auto } });
         tabs.Items.Add(new TabItem { Header = "动作与差分", Content = new ScrollViewer { Content = BuildPartsPage(), VerticalScrollBarVisibility = ScrollBarVisibility.Auto } });
         // local patch (说话页): 字数上限与她说过的每一句
         tabs.Items.Add(new TabItem { Header = "说话与交流", Content = new ScrollViewer { Content = BuildTalkPage(), VerticalScrollBarVisibility = ScrollBarVisibility.Auto } });
         // local patch (扩展包): 装了扩展、或者装过但全停用了，才多这一页
-        if (Extensions.All.Count > 0)
-        {
-            tabs.Items.Add(new TabItem { Header = "扩展包", Content = new ScrollViewer { Content = BuildPacksPage(), VerticalScrollBarVisibility = ScrollBarVisibility.Auto } });
-        }
+        if (Extensions.All.Count > 0) ShowPacksTab();
 
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(18, 10, 18, 14) };
         var close = new Button { Content = "关闭", Padding = new Thickness(22, 5, 22, 5) };
@@ -222,6 +225,9 @@ internal sealed class SettingsWindow : Window
             TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = new SolidColorBrush(Color.FromRgb(120, 126, 148)), Margin = new Thickness(0, 2, 0, 6),
         });
         var bar = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 8) };
+        var grab = new Button { Content = "获取扩展…", Padding = new Thickness(16, 4, 16, 4), Margin = new Thickness(0, 0, 8, 0) };
+        grab.Click += (_, _) => openGrab();
+        bar.Children.Add(grab);
         bar.Children.Add(RestoreButton("打开扩展文件夹", OpenPacksFolder));
         var again = new Button { Content = "重新扫描", Padding = new Thickness(16, 4, 16, 4), Margin = new Thickness(8, 0, 0, 0) };
         again.Click += (_, _) => ReloadExtensions();
@@ -323,11 +329,34 @@ internal sealed class SettingsWindow : Window
             stack.Children.Add(new TextBlock { Text = pack.Source, FontSize = 11, Margin = new Thickness(24, 2, 0, 0), Foreground = new SolidColorBrush(Color.FromRgb(120, 140, 190)) });
         if (pack.Error is { } error)
             stack.Children.Add(new TextBlock { Text = "⚠ " + error, FontSize = 11, Margin = new Thickness(24, 2, 0, 0), TextWrapping = TextWrapping.Wrap, Foreground = new SolidColorBrush(Color.FromRgb(180, 90, 40)) });
-        var open = new Button { Content = "打开这个包", Padding = new Thickness(12, 2, 12, 2), Margin = new Thickness(24, 6, 0, 0), HorizontalAlignment = HorizontalAlignment.Left };
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(24, 6, 0, 0) };
+        var adapt = new Button { Content = "扩展适配", Padding = new Thickness(12, 2, 12, 2), Margin = new Thickness(0, 0, 8, 0) };
+        adapt.Click += (_, _) => requestPackAdapt(pack.Id);
+        row.Children.Add(adapt);
+        var open = new Button { Content = "打开这个包", Padding = new Thickness(12, 2, 12, 2) };
         open.Click += (_, _) => OpenFolder(pack.Folder);
-        stack.Children.Add(open);
+        row.Children.Add(open);
+        stack.Children.Add(row);
         box.Child = stack;
         return box;
+    }
+
+    // local patch (扩展包): 数据变了就把这一页重画；本来就还没有这一页就补上。
+    internal void RefreshPacks()
+    {
+        if (packsTab != null) ((ScrollViewer)packsTab.Content).Content = BuildPacksPage();
+        else if (Extensions.All.Count > 0) ShowPacksTab();
+    }
+
+    private void ShowPacksTab()
+    {
+        if (packsTab != null) return;
+        packsTab = new TabItem
+        {
+            Header = "扩展包",
+            Content = new ScrollViewer { Content = BuildPacksPage(), VerticalScrollBarVisibility = ScrollBarVisibility.Auto },
+        };
+        tabs.Items.Add(packsTab);
     }
 
     private void SetPackEnabled(string id, bool on)
@@ -338,7 +367,7 @@ internal sealed class SettingsWindow : Window
 
     private void ReloadExtensions()
     {
-        Extensions.Reload();
+        Extensions.Reload(currentModel());
         Body.UseExtraWords(Extensions.Words, Extensions.Expansions);
         Behavior.UseExtraMoods(Extensions.Moods);
         RefreshParts();

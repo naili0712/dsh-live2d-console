@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.Text.Json.Serialization;
 
 namespace FishPet;
@@ -61,6 +61,22 @@ internal sealed class ExtensionLines
     [JsonIgnore] public int Count => Items.Count;
 }
 
+/// <summary>本地适配层（extensions\<id>\adapt.json）：包按发布时间写死了参数，换了模型就得有人把
+/// 它翻成这个模型做得到的。这一层不改原包，只覆盖、停用、补充。</summary>
+internal sealed class ExtensionAdapt
+{
+    /// <summary>适配的是哪个模型（完整路径），换了模型这份就作废，重新请 AI 适配。</summary>
+    public string? Model { get; set; }
+    public string? AdaptedAt { get; set; }
+    public string? AdaptedBy { get; set; }
+    public string? Notes { get; set; }
+    /// <summary>覆盖或补充的词：同名覆盖原包，新的直接加上。</summary>
+    public List<ExtensionWord>? Words { get; set; }
+    public List<ExtensionMood>? Moods { get; set; }
+    /// <summary>这个模型做不了的词，列在这里就不装（原包不被改）。</summary>
+    public List<string>? Disabled { get; set; }
+}
+
 /// <summary>一个扩展包。</summary>
 internal sealed class ExtensionPack
 {
@@ -77,6 +93,12 @@ internal sealed class ExtensionPack
     [JsonIgnore] public string Folder { get; set; } = "";
     [JsonIgnore] public bool Enabled { get; set; } = true;
     [JsonIgnore] public string? Error { get; set; }
+    /// <summary>本地适配层，没适配过就是 null。</summary>
+    [JsonIgnore] public ExtensionAdapt? Adapt { get; set; }
+    /// <summary>这份适配是不是给现在这个模型写的（换了模型就不算）。</summary>
+    [JsonIgnore] public bool AdaptedFor { get; set; }
+    [JsonIgnore] public int AdaptedWords => Adapt?.Words?.Count ?? 0;
+    [JsonIgnore] public int DisabledWords => Adapt?.Disabled?.Count ?? 0;
     [JsonIgnore] public int WordCount => Words?.Count(word => string.IsNullOrWhiteSpace(word.Expand)) ?? 0;
     [JsonIgnore] public int ComboCount => Words?.Count(word => !string.IsNullOrWhiteSpace(word.Expand)) ?? 0;
     [JsonIgnore] public int MoodCount => Moods?.Count ?? 0;

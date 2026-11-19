@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -36,9 +36,15 @@ internal static class Extensions
 
     internal static string PackName(string id) => All.FirstOrDefault(pack => pack.Id == id)?.Title ?? id;
 
+    /// <summary>现在对着哪个模型；本地适配层是按模型认的。</summary>
+    internal static string? CurrentModel { get; private set; }
+
+    internal static string AdaptLocation(ExtensionPack pack) => Path.Combine(pack.Folder, "adapt.json");
+
     /// <summary>重读 extensions 目录。装了什么、哪个包出事、谁的名字被谁占了，都记下来。</summary>
-    internal static void Reload()
+    internal static void Reload(string? model = null)
     {
+        if (model != null) CurrentModel = model;
         var packs = new List<ExtensionPack>();
         var words = new Dictionary<string, ExtensionWord>();
         var expansions = new Dictionary<string, string>();
@@ -71,11 +77,14 @@ internal static class Extensions
                     if (string.IsNullOrWhiteSpace(pack.Id)) pack.Id = Path.GetFileName(folder);
                     pack.Enabled = !(off.TryGetValue(pack.Id, out var isOff) && isOff);
                     if (pack.Error == null) LoadLines(pack);
+                    LoadAdapt(pack, CurrentModel);
                     packs.Add(pack);
                     if (pack.Error != null || !pack.Enabled) continue;
+                    // 适配层说这个模型做不了的就跳过了；没列出来的照原样装。
+                    var disabled = new HashSet<string>(pack.Adapt?.Disabled ?? [], StringComparer.Ordinal);
                     foreach (var word in pack.Words ?? [])
                     {
-                        if (string.IsNullOrWhiteSpace(word.Word)) continue;
+                        if (string.IsNullOrWhiteSpace(word.Word) || disabled.Contains(word.Word)) continue;
                         if (!string.IsNullOrWhiteSpace(word.Expand))
                         {
                             if (expansions.ContainsKey(word.Word)) { skipped[word.Word] = pack.Id; continue; }
@@ -87,9 +96,24 @@ internal static class Extensions
                     }
                     foreach (var mood in pack.Moods ?? [])
                     {
-                        if (string.IsNullOrWhiteSpace(mood.Name)) continue;
+                        if (string.IsNullOrWhiteSpace(mood.Name) || disabled.Contains(mood.Name)) continue;
                         if (moods.ContainsKey(mood.Name)) { skipped[mood.Name] = pack.Id; continue; }
                         moods[mood.Name] = mood; moodFrom[mood.Name] = pack.Id;
+                    }
+                    // 本地适配层：只对着这个模型时生效，覆盖原包的词、补上它没有的。
+                    if (pack.AdaptedFor && pack.Adapt is { } adapted)
+                    {
+                        foreach (var word in adapted.Words ?? [])
+                        {
+                            if (string.IsNullOrWhiteSpace(word.Word)) continue;
+                            if (!string.IsNullOrWhiteSpace(word.Expand)) { expansions[word.Word] = word.Expand; expansionFrom[word.Word] = pack.Id; continue; }
+                            words[word.Word] = word; wordFrom[word.Word] = pack.Id;
+                        }
+                        foreach (var mood in adapted.Moods ?? [])
+                        {
+                            if (string.IsNullOrWhiteSpace(mood.Name)) continue;
+                            moods[mood.Name] = mood; moodFrom[mood.Name] = pack.Id;
+                        }
                     }
                 }
             }
@@ -103,6 +127,20 @@ internal static class Extensions
         Skipped = skipped;
         LastError = trouble;
         if (trouble != null) Places.Log("扩展包：" + trouble);
+    }
+
+    // 本地适配层：extensions\<id>\adapt.json，按模型认——换了模型这份就不算，要重新请 AI 适配。
+    private static void LoadAdapt(ExtensionPack pack, string? model)
+    {
+        try
+        {
+            string path = AdaptLocation(pack);
+            if (!File.Exists(path)) return;
+            pack.Adapt = JsonSerializer.Deserialize<ExtensionAdapt>(File.ReadAllText(path), Read);
+            pack.AdaptedFor = pack.Adapt?.Model is { Length: > 0 } intended && model is { Length: > 0 } &&
+                string.Equals(Path.GetFullPath(intended), Path.GetFullPath(model), StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception error) { pack.Error ??= "读 adapt.json 失败：" + error.Message; }
     }
 
     private static void LoadLines(ExtensionPack pack)
@@ -142,7 +180,7 @@ internal static class Extensions
             File.WriteAllText(StatePath, JsonSerializer.Serialize(state, Write));
         }
         catch (Exception error) { Places.Log("扩展状态写不进去：" + error.Message); }
-        Reload();
+        Reload(CurrentModel);
     }
 
     /// <summary>扩展带来的台词，按种类合并。</summary>
