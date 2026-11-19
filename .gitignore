@@ -18,6 +18,9 @@ pet/renderer/build/
 pet/model/
 pet/sdk/
 
+# 扩展包的启停状态（运行时写）
+pet/extensions/.state.json
+
 # 打包产物
 *.tar.gz
 
