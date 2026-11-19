@@ -137,12 +137,12 @@ internal sealed partial class Body
     {
         var unread = new List<(string, string?)>();
         foreach (Match cue in CuePattern().Matches(text))
-            foreach (var token in cue.Value[1..^1].Split([' ', '　', '、', '，', ','], StringSplitOptions.RemoveEmptyEntries))
+            foreach (var token in ExpandTokens(cue.Value[1..^1]))
             {
                 string name = Regex.Match(token.TrimStart('-', '－'), @"^(.+?)(?:[×xX*](\d))?(?:[:：](.+))?$").Groups[1].Value;
-                while (!Words.ContainsKey(name) && name.Length > 1 && name[0] is '微' or '大' or '快' or '慢') name = name[1..];
-                if (Words.ContainsKey(name)) continue;
-                var near = Words.Keys.Where(word => word.Length == name.Length && word.Zip(name).Count(pair => pair.First != pair.Second) == 1).ToList();
+                while (!HasWord(name) && name.Length > 1 && name[0] is '微' or '大' or '快' or '慢') name = name[1..];
+                if (HasWord(name)) continue;
+                var near = KnownWords.Where(word => word.Length == name.Length && word.Zip(name).Count(pair => pair.First != pair.Second) == 1).ToList();
                 unread.Add((token, near.Count == 1 ? near[0] : null));
             }
         return unread;
@@ -182,7 +182,7 @@ internal sealed partial class Body
     {
         double wait = 0;
         double toneSize = tone == '！' ? 1.2 : tone == '…' ? .85 : 1, toneSpeed = tone == '！' ? .85 : tone == '…' ? 1.25 : 1;
-        foreach (var token in cue.Split([' ', '　', '、', '，', ','], StringSplitOptions.RemoveEmptyEntries))
+        foreach (var token in ExpandTokens(cue))
         {
             if (token[0] is '-' or '－')
             {
@@ -196,12 +196,12 @@ internal sealed partial class Body
             string name = match.Groups[1].Value;
             double? size = null, speed = null;
             // 微/大 in front make a word smaller or bigger, 快/慢 a move quicker or slower, unless they belong to it (大笑).
-            while (!Words.ContainsKey(name) && name.Length > 1 && name[0] is '微' or '大' or '快' or '慢')
+            while (!HasWord(name) && name.Length > 1 && name[0] is '微' or '大' or '快' or '慢')
             {
                 switch (name[0]) { case '微': size = .5; break; case '大': size = 1.4; break; case '快': speed = .65; break; default: speed = 1.7; break; }
                 name = name[1..];
             }
-            if (!Words.TryGetValue(name, out var make)) { Unknown.Add(token); continue; }
+            if (!TryWord(name, out var make)) { Unknown.Add(token); continue; }
             int? count = match.Groups[2].Success ? int.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture) : null;
             string? where = match.Groups[3].Success ? match.Groups[3].Value : null;
             bool reflex = Reflexes.Contains(name);
@@ -234,7 +234,52 @@ internal sealed partial class Body
         return Math.Min(wait, LongestWait);
     }
 
-    private static Word? Find(string name) => Words.TryGetValue(name, out var make) ? make(null, 1, null) : null;
+    private static Word? Find(string name) => TryWord(name, out var make) ? make(null, 1, null) : null;
+
+    // local patch (扩展包): 装进来的动作词。内置那套永远先查，扩展只补它没占的名字。
+    private static Dictionary<string, Func<string?, double, int?, Word>>? extraWords;
+    private static Dictionary<string, string>? extraExpansions;
+    internal static void UseExtraWords(IReadOnlyDictionary<string, ExtensionWord> defs, IReadOnlyDictionary<string, string> expansions)
+    {
+        extraWords = defs.Count == 0 ? null : defs.ToDictionary(pair => pair.Key, pair => Build(pair.Value), StringComparer.Ordinal);
+        extraExpansions = expansions.Count == 0 ? null : expansions.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
+    }
+    internal static bool HasWord(string name) =>
+        Words.ContainsKey(name) || (extraWords?.ContainsKey(name) ?? false) || (extraExpansions?.ContainsKey(name) ?? false);
+    private static IEnumerable<string> KnownWords => extraExpansions == null ? KnownSame : KnownSame.Concat(extraExpansions.Keys);
+    private static IEnumerable<string> KnownSame => extraWords == null ? Words.Keys : Words.Keys.Concat(extraWords.Keys);
+    // 组合词展开成基础词再一个个做；最多三层，防自己套自己。
+    private static IEnumerable<string> ExpandTokens(string cue)
+    {
+        foreach (var token in cue.Split([' ', '　', '、', '，', ','], StringSplitOptions.RemoveEmptyEntries))
+            foreach (var part in Expand(token, 0)) yield return part;
+    }
+    private static IEnumerable<string> Expand(string token, int depth)
+    {
+        if (depth < 3 && extraExpansions != null && extraExpansions.TryGetValue(token, out var inner))
+        {
+            foreach (var part in inner.Split([' ', '　', '、', '，', ','], StringSplitOptions.RemoveEmptyEntries))
+                foreach (var one in Expand(part, depth + 1)) yield return one;
+        }
+        else yield return token;
+    }
+    private static bool TryWord(string name, out Func<string?, double, int?, Word>? make)
+    {
+        if (Words.TryGetValue(name, out make)) return true;
+        if (extraWords != null && extraWords.TryGetValue(name, out make)) return true;
+        make = null;
+        return false;
+    }
+    // 扩展词的价值是「不重编译就能加词」：数值按大小系数缩放，动作轨和内置词一样被语气拉快拉慢（Apply 里做）。
+    private static Func<string?, double, int?, Word> Build(ExtensionWord def) => (_, size, _) => new Word(
+        def.Channel,
+        def.Hold?.Select(item => (item.Id, item.Value * size)).ToArray(),
+        def.Overlay,
+        def.HandOn != null && def.HandOff != null ? (def.HandOn, def.HandOff) : null,
+        def.HandDown,
+        def.Move?.Select(item => (item.Id, item.Keys)).ToArray(),
+        def.Clear?.ToArray(),
+        def.Reset);
 
     private void TakeOverHand()
     {

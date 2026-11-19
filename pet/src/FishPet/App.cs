@@ -28,6 +28,10 @@ internal static class Program
         app.DispatcherUnhandledException += (_, e) => { Places.Log("出错了：" + e.Exception); e.Handled = true; };
         // local patch (模型页): 设置里选过的模型也要用上
         var settings = Settings.Load();
+        // local patch (扩展包): 先读 extensions 目录再让她长出来——动作词和表情在构造时就定型。
+        Extensions.Reload();
+        Body.UseExtraWords(Extensions.Words, Extensions.Expansions);
+        Behavior.UseExtraMoods(Extensions.Moods);
         new PetWindow(settings, Places.Model(Option("--model"), settings.ModelFile), test, Option("--pipe")).Show();
         return app.Run();
     }

@@ -26,7 +26,7 @@ internal sealed class Behavior
     private static readonly TimeSpan ClickSpan = TimeSpan.FromSeconds(2.5);
     private const int ClicksForBasin = 5;
 
-    internal static readonly IReadOnlyDictionary<string, Mood> Moods = new Dictionary<string, Mood>
+    private static readonly IReadOnlyDictionary<string, Mood> BuiltinMoods = new Dictionary<string, Mood>
     {
         ["问候"] = new([], [("EyeSmile", 1), ("ParamMouthForm", 1)], 4.4, [("FaceAngleZ", "0:0 .5:7 1:5 1.5:0 3.4:0 3.8:7 4.4:0"), ("LeanInput", "0:0 1.1:0 1.7:-11 2.6:-11 3.3:0"), ("FaceAngleY", "0:0 1.1:0 1.7:-19 2.2:-17 2.6:-19 3.3:0"), ("ViewSquash", "0:0 1.1:0 1.7:.04 2.6:.04 3.3:0"), ("EyeOpen", "0:0 1.2:0 1.6:-1 2.7:-1 3.1:0 4.4:0")], ("默认手切举手", "举手切默认手")),
         ["告别"] = new([], [("EyeSmile", 1), ("ParamMouthForm", 1)], 3, [("FaceAngleZ", "0:0 .4:6 .8:0"), ("LeanInput", "0:0 .7:0 1.3:-12 2.6:-12 3:0"), ("FaceAngleY", "0:0 .7:0 1.3:-19 2.6:-19 3:0"), ("ViewSquash", "0:0 .7:0 1.3:.04 2.6:.04 3:0"), ("EyeOpen", "0:0 .8:0 1.2:-1 2.6:-1 3:0")], ("默认手切举手", "举手切默认手")),
@@ -59,6 +59,22 @@ internal sealed class Behavior
     internal static int IdleWeight(string name, int hour) => Sleepy.Contains(name) && hour is >= 23 or < 6 ? 4 : 1;
     // local patch (模型页): 设置页列出内置小动作用。
     internal static IReadOnlyList<string> IdleNames => IdleMoods;
+
+    // local patch (扩展包): 装进来的表情并进表情池；内置同名优先，扩展只补没占的名字。
+    private static Dictionary<string, Mood> extraMoods = [];
+    internal static IReadOnlyDictionary<string, Mood> Moods => extraMoods.Count == 0 ? BuiltinMoods : extraMoods;
+    internal static void UseExtraMoods(IReadOnlyDictionary<string, ExtensionMood> defs)
+    {
+        extraMoods = defs.Where(pair => !BuiltinMoods.ContainsKey(pair.Key))
+            .ToDictionary(pair => pair.Key, pair => Build(pair.Value), StringComparer.Ordinal);
+    }
+    private static Mood Build(ExtensionMood def) => new(
+        def.Expressions?.ToArray() ?? [],
+        def.Parameters?.Select(item => (item.Id, item.Value)).ToArray() ?? [],
+        def.Seconds,
+        def.Motion?.Select(item => (item.Id, item.Keys)).ToArray(),
+        def.GestureOn != null && def.GestureOff != null ? (def.GestureOn, def.GestureOff) : null,
+        def.Pushed);
     // Dangling from the mouse: dizzy, mouth open in an "ah", brows up, swaying. 落地 when let go.
     private static readonly (string Id, string Keys)[] Dangling = [("FaceAngleZ", "0:0 .6:10 1.8:-10 2.4:0"), ("FaceAngleX", "0:0 .6:-4 1.8:4 2.4:0")];
     private static readonly (string Id, double Value)[] Hanging = [("ParamMouthOpenY", .35), ("JawOpen", .2), ("MouthFunnel", .3), ("BrowInnerUp", .8)];
