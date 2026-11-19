@@ -1116,7 +1116,20 @@ internal sealed class PetWindow : Window
     {
         var waited = Stopwatch.StartNew();
         while ((silent != null || speech.IsSaying) && waited.Elapsed.TotalSeconds < 20 + speech.Spoken) await Task.Delay(50, token);
+        // local patch (气泡排队): 上一句演完了，气泡还要悬浮一会儿；等它停够再让下一条开口，免得新话把旧气泡的字硬顶掉。
+        // bubble_seconds = -1 是「一直留着」，那时最多等 20 秒，不让队列卡死；点掉气泡也会立刻放行。
+        var hold = speech.HoldUntil;
+        if (hold != DateTime.MaxValue && hold > DateTime.UtcNow)
+        {
+            var left = (hold - DateTime.UtcNow).TotalSeconds;
+            if (settings.BubbleSeconds < 0) left = Math.Min(left, 20);
+            left = Math.Min(left, 300);
+            if (left > 0) await Task.Delay(TimeSpan.FromSeconds(left), token);
+        }
     }
+
+    // local patch (气泡排队): 气泡被点掉，这一句就算停够了。
+    internal void BubbleClicked() => speech.Dismiss();
 
     // In the order they came, each once the one before has been acted out.
     private async Task InTurn(Func<Task> act, CancellationToken token)

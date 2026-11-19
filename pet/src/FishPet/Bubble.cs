@@ -71,8 +71,8 @@ internal sealed class BubbleWindow : Window
         SizeChanged += (_, _) => Place();
         pet.LocationChanged += (_, _) => Place();
         pet.SizeChanged += (_, _) => Place();
-        // A click on the bubble closes it.
-        MouseLeftButtonUp += (_, _) => Hide();
+        // A click on the bubble closes it. local patch (气泡排队): 点掉就算这句停够了，下一句不用再等。
+        MouseLeftButtonUp += (_, _) => { Hide(); pet.BubbleClicked(); };
     }
 
     // In a test the bubble only keeps its words, out of the user's sight.
@@ -126,6 +126,12 @@ internal sealed class Speech
         0 => DateTime.UtcNow + StaysFor(words),
         var seconds => DateTime.UtcNow.AddSeconds(seconds),
     };
+
+    // local patch (气泡排队): 这一句的气泡该留到什么时候；下一条话要等它留够再出现，不把字顶掉。
+    internal DateTime HoldUntil => hideAt;
+
+    // local patch (气泡排队): 气泡被点掉，就不用再留着等它了。
+    internal void Dismiss() => hideAt = DateTime.MaxValue;
 
     internal Speech(BubbleWindow bubble)
     {
