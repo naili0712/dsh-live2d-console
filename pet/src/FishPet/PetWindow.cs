@@ -482,14 +482,14 @@ internal sealed class PetWindow : Window
     // local patch (扩展包): agent 通过这个工具给一个包写「本地适配层」——不动原包，只覆盖、停用、补充。
     private object AdaptPackTool(JsonElement args)
     {
-        if (model == null) throw new InvalidOperationException("还没有模型，先在设置里选一个。");
+        if (model == null) throw new InvalidOperationException("尚未选择模型，请先在设置中选择。");
         string action = args.TryGetProperty("action", out var kind) && kind.ValueKind == JsonValueKind.String ? kind.GetString()! : "read";
         string? wanted = Tools.OptionalText(args, "id");
         var pack = wanted != null
             ? Extensions.All.FirstOrDefault(item => string.Equals(item.Id, wanted, StringComparison.OrdinalIgnoreCase))
             : Extensions.All.FirstOrDefault(item => item.Id == packAskedId);
         if (pack == null)
-            throw new ArgumentException("没有这个扩展包。现在装着的是：" + string.Join("、", Extensions.All.Select(item => item.Id)));
+            throw new ArgumentException("未找到该扩展包。当前已安装：" + string.Join("、", Extensions.All.Select(item => item.Id)));
         string path = Extensions.AdaptLocation(pack);
         if (action == "read")
             return new
@@ -506,7 +506,7 @@ internal sealed class PetWindow : Window
         if (action == "reset")
         {
             try { if (File.Exists(path)) File.Delete(path); }
-            catch (Exception error) { throw new InvalidOperationException("删不掉 adapt.json：" + error.Message); }
+            catch (Exception error) { throw new InvalidOperationException("无法删除 adapt.json：" + error.Message); }
             packToldAt = packAskedAt;
             ReloadPacks();
             return new { reset = true, adaptFile = path };
@@ -548,7 +548,7 @@ internal sealed class PetWindow : Window
                 WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
             }));
         }
-        catch (Exception error) { throw new InvalidOperationException("写不进 adapt.json：" + error.Message); }
+        catch (Exception error) { throw new InvalidOperationException("无法写入 adapt.json：" + error.Message); }
         packToldAt = packAskedAt;
         ReloadPacks();
         return new
@@ -571,7 +571,7 @@ internal sealed class PetWindow : Window
     // local patch (模型适配): agent 通过这个工具看/写/清当前模型的适配档。
     private object AdaptTool(JsonElement args)
     {
-        if (model == null) throw new InvalidOperationException("还没有模型，先在设置里选一个。");
+        if (model == null) throw new InvalidOperationException("尚未选择模型，请先在设置中选择。");
         string action = args.TryGetProperty("action", out var kind) && kind.ValueKind == JsonValueKind.String ? kind.GetString()! : "read";
         var profile = adapt.Current(model);
         if (action == "read")
@@ -1185,7 +1185,7 @@ internal sealed class PetWindow : Window
     private double? PlayVoice(string? file)
     {
         if (string.IsNullOrWhiteSpace(file) || !Path.IsPathRooted(file) || !file.EndsWith(".wav", StringComparison.OrdinalIgnoreCase) || !File.Exists(file))
-            throw new ArgumentException("audio 要是本机 wav 文件的完整路径，而且文件要在。");
+            throw new ArgumentException("audio 必须为本机 wav 文件的完整路径，且文件必须存在。");
         voicePlayer.Stop();
         voicePlayer.Open(new Uri(file));
         voicePlayer.Play();
@@ -1474,7 +1474,7 @@ internal sealed class PetWindow : Window
 
     private async Task<object> Run(string name, JsonElement args, CancellationToken token)
     {
-        if (exiting) throw new InvalidOperationException("你正在告别，收起之后再叫你出来。");
+        if (exiting) throw new InvalidOperationException("正在退出，收起完成后再调用。");
         if (name is not ("get_state" or "quit" or "recent_events") && trouble != null && player == null) throw new InvalidOperationException(trouble);
         switch (name)
         {
@@ -1498,14 +1498,14 @@ internal sealed class PetWindow : Window
             case "look_in_mirror":
                 var pose = Tools.OptionalText(args, "try");
                 IReadOnlyList<BitmapSource> shots = pose != null ? await TryInMirror(pose, token) : Snapshot() is { } now ? [now] : [];
-                if (shots.Count == 0) throw new InvalidOperationException("镜子里还什么都看不到，等你出现了再照。");
+                if (shots.Count == 0) throw new InvalidOperationException("镜子中尚无可显示内容，请等待角色出现后再查看。");
                 return Tools.Image(Picture(shots), new { shots = shots.Count, tried = pose });
             case "look_back":
                 int which = args.TryGetProperty("which", out var value) && value.TryGetInt32(out var number) ? number : 1;
                 if (film != null && !speech.IsSaying && silent == null) FinishFilming();
                 TrimPhotos();
-                if (photos.Count == 0) throw new InvalidOperationException("这半小时里还没有拍下你说话的样子。");
-                if (which < 1 || which > photos.Count) throw new ArgumentException("只留着最近 " + photos.Count + " 句的样子。");
+                if (photos.Count == 0) throw new InvalidOperationException("最近半小时内没有记录到你说话时的画面。");
+                if (which < 1 || which > photos.Count) throw new ArgumentException("仅保留最近 " + photos.Count + " 句的记录。");
                 var photo = photos[^which];
                 int Ago(DateTime at) => (int)(DateTime.UtcNow - at).TotalSeconds;
                 return Tools.Image(photo.Picture, new { said = photo.Said, secondsAgo = Ago(photo.At),
