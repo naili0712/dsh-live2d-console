@@ -29,7 +29,8 @@ internal sealed class PetWindow : Window
     private string? model; // local patch (模型页): 设置里选过的模型可以当场换
     private readonly bool test;
     private readonly SpriteImage image = new() { Stretch = Stretch.Fill };
-    private readonly BubbleWindow bubble;
+    // local patch (气泡叠加): 头顶那一叠气泡，一句一个，互不顶掉。
+    private readonly BubbleStack bubbleStack;
     private readonly Speech speech;
     private readonly Behavior behavior;
     private readonly Body body;
@@ -84,6 +85,8 @@ internal sealed class PetWindow : Window
     private readonly MediaPlayer voicePlayer = new();
     private float[]? voice;
     private DateTime voiceUntil;
+    // local patch (语音预留): 一条语音没说完，下一条先排队，不抢麦；将来每句各带自己的语音和气泡时用。
+    private readonly Queue<string> voiceQueue = new();
     private double mouth;
     private const int VoiceStepMilliseconds = 33;
 
@@ -126,10 +129,9 @@ internal sealed class PetWindow : Window
         RenderOptions.SetBitmapScalingMode(image, BitmapScalingMode.HighQuality);
         image.Opacity = 0;
         Content = new Grid { Children = { image } };
-        bubble = new BubbleWindow(this, () => Height * Shape.HeadTop);
-        bubble.Quiet = test;
-        bubble.Scale = settings.BubbleScale;
-        speech = new Speech(bubble) { Seconds = settings.BubbleSeconds };
+        bubbleStack = new BubbleStack(this, () => Height * Shape.HeadTop) { Quiet = test }; // local patch (气泡叠加)
+        bubbleStack.Scale = settings.BubbleScale;
+        speech = new Speech { Seconds = settings.BubbleSeconds };
         body = new Body(Send);
         updates = new Updates(Places.Root, Places.Log);
         behavior = new Behavior(Send, () => [.. settings.Outfit, .. body.Overlays, .. comboExpressions], new Random())
@@ -177,7 +179,7 @@ internal sealed class PetWindow : Window
         DpiChanged += (_, _) => { ApplySize(); UpdateCut(); };
         LostMouseCapture += (_, _) => { if (dragging) { dragging = false; if (dragged) Dropped(); } };
         Closing += Leaving;
-        Closed += (_, _) => { tray?.Dispose(); server?.Dispose(); api?.Dispose(); player?.Dispose(); bubble.Close(); };
+        Closed += (_, _) => { tray?.Dispose(); server?.Dispose(); api?.Dispose(); player?.Dispose(); bubbleStack.HideAll(); };
         // local patch (托盘): 再启动一次 exe（快捷方式/开始菜单）时，把已经收起来的她叫出来。
         var wake = new EventWaitHandle(false, EventResetMode.AutoReset, "FishPet.Show." + Tools.PipeName);
         new Thread(() => { while (wake.WaitOne()) Dispatcher.BeginInvoke(new Action(ShowFromTray)); }) { IsBackground = true, Name = "FishPet.Show" }.Start();
@@ -380,7 +382,7 @@ internal sealed class PetWindow : Window
         }
         catch (Exception error) { Places.Log("适配请求没能落盘：" + error.Message); }
         Happened("adapt_request", new { model });
-        bubble.Say("好，我去叫 AI 来配一下这个模型点她身上的反应");
+        bubbleStack.Say("好，我去叫 AI 来配一下这个模型点她身上的反应");
     }
 
     // local patch (扩展包): 设置里点了某个包的「扩展适配」——包是按发布时的模型写的，换个模型
@@ -392,7 +394,7 @@ internal sealed class PetWindow : Window
     {
         var pack = Extensions.All.FirstOrDefault(item => item.Id == id);
         if (pack == null) return;
-        if (model == null) { bubble.Say("先选个模型吧，不然不知道要照着谁适配"); return; }
+        if (model == null) { bubbleStack.Say("先选个模型吧，不然不知道要照着谁适配"); return; }
         packAskedAt = DateTime.UtcNow; packToldAt = null; packAskedId = id;
         try
         {
@@ -417,7 +419,7 @@ internal sealed class PetWindow : Window
         }
         catch (Exception error) { Places.Log("扩展适配请求没能落盘：" + error.Message); }
         Happened("pack_adapt_request", new { id });
-        bubble.Say("好，让 AI 去看看这个包在这个模型上做不做得了，做不了的换成本体能做出来的");
+        bubbleStack.Say("好，让 AI 去看看这个包在这个模型上做不做得了，做不了的换成本体能做出来的");
     }
 
     private string PackAdaptNotice()
@@ -436,7 +438,7 @@ internal sealed class PetWindow : Window
 
     internal void RequestPackGrab(string inbox, string[] files)
     {
-        if (model == null) { bubble.Say("先选个模型吧，扩展包要照着它有的动作写"); return; }
+        if (model == null) { bubbleStack.Say("先选个模型吧，扩展包要照着它有的动作写"); return; }
         grabAskedAt = DateTime.UtcNow; grabToldAt = null; grabInbox = inbox;
         try
         {
@@ -461,7 +463,7 @@ internal sealed class PetWindow : Window
         }
         catch (Exception error) { Places.Log("扩展获取请求没能落盘：" + error.Message); }
         Happened("pack_grab_request", new { inbox, files });
-        bubble.Say("收到，" + files.Length + " 个素材，我让 AI 去认里面的动作");
+        bubbleStack.Say("收到，" + files.Length + " 个素材，我让 AI 去认里面的动作");
     }
 
     private string GrabNotice() =>
@@ -705,7 +707,7 @@ internal sealed class PetWindow : Window
         // local patch (模型适配): 换上来先告诉她适配没有（大肥鱼那套原生模型不用配），需要就去设置里叫 AI 调。
         bool native = ModelParts.Expressions(path).Contains("黑框眼镜");
         if (!native && !adapt.Current(path).Adapted)
-            bubble.Say("这个模型点她不同位置还没适配，要叫 AI 来调吗？右键「设置…」→「模型与适配」里有「让 AI 调」");
+            bubbleStack.Say("这个模型点她不同位置还没适配，要叫 AI 来调吗？右键「设置…」→「模型与适配」里有「让 AI 调」");
     }
 
     private void Restart()
@@ -746,7 +748,7 @@ internal sealed class PetWindow : Window
     {
         trouble = message;
         Places.Log(message);
-        bubble.Say(message);
+        bubbleStack.Say(message);
     }
 
     // She comes in and greets once her body type has settled.
@@ -864,6 +866,7 @@ internal sealed class PetWindow : Window
         UpdateBody();
         UpdateFilm();
         speech.Tick();
+        bubbleStack.Tick(); // local patch (气泡叠加): 到时间的气泡收走，剩下的往上让位
         // Nothing of her own while she says something or still holds the look she said it with.
         behavior.Tick(DateTime.UtcNow, voice != null || speech.IsSaying || silent != null || body.Posing || comboBusy, settings.IdleSeconds);
         if (!settings.FollowMouse || test)
@@ -911,8 +914,8 @@ internal sealed class PetWindow : Window
         if (covered == hiddenForFullscreen) return;
         hiddenForFullscreen = covered;
         current.Send($"pause {(covered ? 1 : 0)}");
-        bubble.Quiet = covered || test;
-        if (covered) { bubble.Hide(); Hide(); return; }
+        bubbleStack.Quiet = covered || test;
+        if (covered) { bubbleStack.HideAll(); Hide(); return; }
         if (trayHidden) return; // local patch (托盘): 她本来就被收起来了，别自己冒出来
         Show();
         Topmost = false; Topmost = true;
@@ -1116,20 +1119,18 @@ internal sealed class PetWindow : Window
     {
         var waited = Stopwatch.StartNew();
         while ((silent != null || speech.IsSaying) && waited.Elapsed.TotalSeconds < 20 + speech.Spoken) await Task.Delay(50, token);
-        // local patch (气泡排队): 上一句演完了，气泡还要悬浮一会儿；等它停够再让下一条开口，免得新话把旧气泡的字硬顶掉。
-        // bubble_seconds = -1 是「一直留着」，那时最多等 20 秒，不让队列卡死；点掉气泡也会立刻放行。
-        var hold = speech.HoldUntil;
-        if (hold != DateTime.MaxValue && hold > DateTime.UtcNow)
-        {
-            var left = (hold - DateTime.UtcNow).TotalSeconds;
-            if (settings.BubbleSeconds < 0) left = Math.Min(left, 20);
-            left = Math.Min(left, 300);
-            if (left > 0) await Task.Delay(TimeSpan.FromSeconds(left), token);
-        }
+        // local patch (气泡叠加): 不再等上一句气泡悬停——气泡各留各的，下一句立刻开口。
     }
 
-    // local patch (气泡排队): 气泡被点掉，这一句就算停够了。
-    internal void BubbleClicked() => speech.Dismiss();
+    // local patch (气泡叠加): 点哪个气泡收哪个；正说着的那句也停下，不再接着演。
+    internal void BubbleClicked(BubbleWindow window)
+    {
+        if (speech.Bubble == window) speech.Stop();
+        bubbleStack.Closed(window);
+    }
+
+    // local patch (气泡叠加): 气泡大小变了（逐字时换行），那一叠重新让位。
+    internal void BubbleResized(BubbleWindow _) => bubbleStack.Reflow();
 
     // In the order they came, each once the one before has been acted out.
     private async Task InTurn(Func<Task> act, CancellationToken token)
@@ -1148,7 +1149,8 @@ internal sealed class PetWindow : Window
         var line = new Line(text, body.Apply, voiceSeconds);
         if (line.Plain.Trim().Length == 0) { PlaySilently(text); return; }
         StartFilming(line.Plain);
-        speech.Say(line);
+        // local patch (气泡叠加): 这一句自己一个气泡，说完留在头顶，不拖住下一句。
+        speech.Say(line, bubbleStack.Open());
     }
 
     // film: false for what she tries in the mirror, which she sees there already.
@@ -1176,6 +1178,9 @@ internal sealed class PetWindow : Window
         relaxAt = null;
     }
 
+    // local patch (语音预留): 把一条语音排上；正在播的那条说完才轮到它。
+    private void QueueVoice(string file) => voiceQueue.Enqueue(file);
+
     // Returns how long the recording is, for spreading what she does over it.
     private double? PlayVoice(string? file)
     {
@@ -1194,6 +1199,8 @@ internal sealed class PetWindow : Window
     // Her recorded voice when there is one; otherwise her mouth moves while the words come out.
     private void UpdateMouth(Player current)
     {
+        // local patch (语音预留): 上一条说完了，排着的下一条接着播。
+        if (voice == null && voiceQueue.Count > 0) PlayVoice(voiceQueue.Dequeue());
         double level = 0;
         if (voice is { } levels)
         {
@@ -1351,7 +1358,7 @@ internal sealed class PetWindow : Window
         Send($"fps {settings.Fps}");
         ApplySize();
         Clamp();
-        bubble.Scale = settings.BubbleScale;
+        bubbleStack.Scale = settings.BubbleScale;
         speech.Seconds = settings.BubbleSeconds;
         nextFullscreenLook = default;
         if (player != null && appliedShape != Shape.Find(settings.Shape).Id) SetShape(settings.Shape);
@@ -1366,6 +1373,7 @@ internal sealed class PetWindow : Window
     {
         if (exiting) return;
         speech.Stop();
+        bubbleStack.HideAll(); // local patch (气泡叠加): 收起来时气泡一并收走
         trayHidden = true;
         if (IsVisible)
         {
@@ -1407,6 +1415,7 @@ internal sealed class PetWindow : Window
         if (exiting) return;
         exiting = true;
         speech.Stop();
+        bubbleStack.HideAll(); // local patch (气泡叠加)
         if (player != null && image.Opacity > 0)
         {
             behavior.Show("告别", DateTime.UtcNow);
@@ -1536,7 +1545,7 @@ internal sealed class PetWindow : Window
                 }
                 if (args.TryGetProperty("bubble_scale", out var bubbleScale) && bubbleScale.TryGetDouble(out var bubbleSize))
                 {
-                    settings.BubbleScale = Math.Clamp(bubbleSize, .5, 2); bubble.Scale = settings.BubbleScale;
+                    settings.BubbleScale = Math.Clamp(bubbleSize, .5, 2); bubbleStack.Scale = settings.BubbleScale;
                 }
                 if (args.TryGetProperty("bubble_seconds", out var stay) && stay.TryGetInt32(out var stays))
                 {
