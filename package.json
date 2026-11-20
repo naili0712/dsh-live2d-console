@@ -1,6 +1,6 @@
 {
   "name": "dsh-live2d-console",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": false,
   "description": "dshlive2d控制台：Live2D 桌宠与 DSH 会话之间的桥，并在 DSH 设置页里提供跟随启停的总控开关。",
   "meta": {

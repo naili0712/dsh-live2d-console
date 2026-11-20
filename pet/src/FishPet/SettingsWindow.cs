@@ -49,6 +49,10 @@ internal sealed class SettingsWindow : Window
     private readonly TextBlock modelNote = new() { TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = new SolidColorBrush(Color.FromRgb(120, 126, 148)), Margin = new Thickness(0, 4, 0, 0) };
     // local patch (模型页): 空闲池的逐项权重
     private readonly StackPanel parts = new();
+    // local patch (扩展包): 动作页顶部的状态行——装了什么、同步了多少；扫描完给一次绿色回执。
+    private readonly TextBlock extNote = new() { TextWrapping = TextWrapping.Wrap, FontSize = 12, Margin = new Thickness(0, 2, 0, 4), Foreground = new SolidColorBrush(Color.FromRgb(120, 126, 148)) };
+    private readonly System.Windows.Threading.DispatcherTimer extFlash = new() { Interval = TimeSpan.FromSeconds(2.6) };
+    private bool extFlashOn;
     private readonly ObservableCollection<TriggerChoice> triggers = new();
     private readonly List<(ComboBox Box, string Zone)> triggerBoxes = [];
     // local patch (外观差分): 当前模型的差分，勾了就一直开着
@@ -61,6 +65,8 @@ internal sealed class SettingsWindow : Window
     private static readonly (string Id, string Label)[] Zones = [("head", "头"), ("face", "脸"), ("hand", "手"), ("skirt", "裙"), ("tail", "尾巴"), ("body", "身上")];
     // local patch (模型适配): 当前模型的适配状态与两个按钮
     private readonly TextBlock adaptStatus = new() { TextWrapping = TextWrapping.Wrap, FontSize = 12, Margin = new Thickness(0, 2, 0, 4) };
+    // local patch (模型适配): 「让 AI 调」的进度——等待 / 读取 / 写入 / 完成 / 超时
+    private readonly TextBlock adaptProgress = new() { TextWrapping = TextWrapping.Wrap, FontSize = 12, Margin = new Thickness(0, 0, 0, 4), Foreground = new SolidColorBrush(Color.FromRgb(120, 126, 148)) };
     private readonly Button askAi = new() { Content = "让 AI 调", Padding = new Thickness(16, 4, 16, 4), Margin = new Thickness(0, 2, 8, 0) };
     private readonly Button resetAdapt = new() { Content = "恢复这个模型的默认适配", Padding = new Thickness(16, 4, 16, 4), Margin = new Thickness(0, 2, 0, 0) };
     private DateTime? askedAt;
@@ -186,7 +192,9 @@ internal sealed class SettingsWindow : Window
         adaptWatch.Tick += (_, _) => WatchAdapt();
         adaptWatch.Start();
         flash.Tick += (_, _) => { flash.Stop(); if (flashZone is { } zone) UpdateCombo(zone); flashZone = null; };
-        Closed += (_, _) => { adaptWatch.Stop(); flash.Stop(); };
+        // local patch (扩展包): 回执亮两秒多就退回常态说明。
+        extFlash.Tick += (_, _) => { extFlash.Stop(); extFlashOn = false; UpdateExtNote(); };
+        Closed += (_, _) => { adaptWatch.Stop(); flash.Stop(); extFlash.Stop(); };
 
         saveLater.Tick += (_, _) => { saveLater.Stop(); Persist(); };
         void Touch(object? sender, EventArgs e) { if (!ready) return; saveLater.Stop(); saveLater.Start(); }
@@ -221,7 +229,7 @@ internal sealed class SettingsWindow : Window
         page.Children.Add(Group("装着的扩展"));
         page.Children.Add(new TextBlock
         {
-            Text = "每个扩展是一个文件夹，置于插件目录的 extensions 下，其中的 pack.json 声明该扩展提供的内容：动作词（可在〔〕中使用）、表情（点击与空闲时播放）、台词（内容库）。内置内容始终优先，扩展仅补充未被占用的名称；两个扩展使用同一名称时，按文件夹名排序靠前者生效。安装后点击「重新扫描」，「动作与差分」页将增加对应选项，并标注来源扩展包。" +
+            Text = "每个扩展是一个文件夹，置于插件目录的 extensions 下，其中的 pack.json 声明该扩展提供的内容：动作词（可在〔〕中使用，也会在「动作与差分」页单独列成一组）、表情（点击与空闲时播放）、台词（内容库）。内置内容始终优先，扩展仅补充未被占用的名称；两个扩展使用同一名称时，按文件夹名排序靠前者生效。安装后点击「重新扫描」，「动作与差分」页会按扩展清单重新排一遍：装了几个包就列几组，装多了往下滑就是，每项都标注来源扩展包。" +
                    Environment.NewLine + "扩展包按发布时对应的模型编写，在当前模型上不一定能够做出相同动作。点击该扩展包的「扩展适配」，由 AI 读取当前模型并生成适配层（原扩展包不做修改）。若没有现成扩展包，可点击「获取扩展」，将视频或素材拖入，由 AI 识别动作后生成扩展包。",
             TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = new SolidColorBrush(Color.FromRgb(120, 126, 148)), Margin = new Thickness(0, 2, 0, 6),
         });
@@ -372,6 +380,28 @@ internal sealed class SettingsWindow : Window
         Body.UseExtraWords(Extensions.Words, Extensions.Expansions);
         Behavior.UseExtraMoods(Extensions.Moods);
         RefreshParts();
+        RefreshPacks();
+        UpdateExtNote(scanned: true); // local patch (扩展包): 扫完给个回执，别让人猜有没有生效
+    }
+
+    // local patch (扩展包): 动作页的状态行。扫完亮一次绿色的完成提示，平时是灰色的说明。
+    private void UpdateExtNote(bool scanned = false)
+    {
+        var active = Extensions.All.Where(pack => pack.Enabled && pack.Error == null).ToArray();
+        if (scanned) { extFlashOn = true; extFlash.Stop(); extFlash.Start(); }
+        if (active.Length == 0)
+        {
+            extFlashOn = false;
+            extNote.Text = "未装扩展：把扩展包放进 extensions 文件夹后点「重新扫描」，这里会跟着列出来。";
+            extNote.Foreground = new SolidColorBrush(Color.FromRgb(120, 126, 148));
+            return;
+        }
+        int words = Extensions.Words.Count + Extensions.Expansions.Count;
+        string counts = active.Length + " 个包 · " + words + " 个动作词 · " + Extensions.Moods.Count + " 个表情";
+        extNote.Text = extFlashOn
+            ? "✓ 重新扫描完成：" + counts + "，已列在下面。"
+            : "扩展内容已同步：" + counts + "（后装的包重扫后自动出现，往下滑看全部）。";
+        extNote.Foreground = new SolidColorBrush(extFlashOn ? Color.FromRgb(60, 120, 80) : Color.FromRgb(120, 126, 148));
     }
 
     private void OpenPacksFolder()
@@ -481,6 +511,7 @@ internal sealed class SettingsWindow : Window
         // local patch (模型适配): 换模型后先看有没有这份适配档；没有就让 agent 来配
         page.Children.Add(Group("适配状态"));
         page.Children.Add(adaptStatus);
+        page.Children.Add(adaptProgress); // local patch (模型适配): 进度单独一行，随时能看出在等、在读、还是已经完了
         askAi.Click += (_, _) => AskAi();
         resetAdapt.Click += (_, _) => { adapt.ResetCurrent(); askedAt = null; RefreshParts(); };
         var adaptButtons = new StackPanel { Orientation = Orientation.Horizontal };
@@ -492,7 +523,7 @@ internal sealed class SettingsWindow : Window
         page.Children.Add(Group("这里适配什么"));
         page.Children.Add(new TextBlock
         {
-            Text = "适配对象为「动作与差分」页中的六个点击触发部位：头、脸、手、裙、尾巴、身上。内置模型已按原有表情与手势配置；更换为其他模型后，需在该页为每个部位指定该模型自身的差分或动作，也可点击「让 AI 调」由 AI 完成配置。未配置的部位点击后不会产生反应。内置模型无需适配。",
+            Text = "适配对象为「动作与差分」页中的六个点击触发部位：头、脸、手、裙、尾巴、身上。内置模型已按原有表情与手势配置；更换为其他模型后，需在该页为每个部位指定该模型自身的差分或动作，也可以直接点「让 AI 调」把这件事交给 AI——它会收到一条请求，读这个模型实际拥有的差分与动作，再把六个部位配好。进度就在上面那一行显示。",
             TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = new SolidColorBrush(Color.FromRgb(120, 126, 148)), Margin = new Thickness(0, 4, 0, 6),
         });
 
@@ -518,6 +549,8 @@ internal sealed class SettingsWindow : Window
             Foreground = new SolidColorBrush(Color.FromRgb(120, 126, 148)),
         });
         page.Children.Add(top);
+        // local patch (扩展包): 扩展装了什么，这一行先说清楚；扫完会亮一下回执。
+        page.Children.Add(extNote);
 
         page.Children.Add(Group("点击部位对应的动作"));
         page.Children.Add(new TextBlock
@@ -593,11 +626,66 @@ internal sealed class SettingsWindow : Window
 
     private void WatchAdapt()
     {
+        RefreshAdaptProgress(); // local patch (模型适配): 没打开适配页也能看到进度在走
         var at = AdaptStamp();
         if (at == adaptSeen) return;
         adaptSeen = at;
         adapt.Invalidate();
         RefreshParts();
+    }
+
+    // local patch (模型适配): 把「让 AI 调」的进度写清楚——等它接单、在读模型、在写适配、写完了、还是迟迟没动静。
+    private void RefreshAdaptProgress()
+    {
+        var model = currentModel();
+        var cache = Path.Combine(Places.Root, "cache");
+        var requested = Path.Combine(cache, "adapt-request.json");
+        var progress = Path.Combine(cache, "adapt-progress.json");
+        var quiet = new SolidColorBrush(Color.FromRgb(120, 126, 148));
+        if (model == null) { adaptProgress.Text = ""; return; }
+        if (!File.Exists(requested))
+        {
+            adaptProgress.Text = "还没有发起过适配请求。点「让 AI 调」，AI 会收到一条请求并回来改这份适配。";
+            adaptProgress.Foreground = quiet;
+            return;
+        }
+        DateTime asked = File.GetLastWriteTime(requested);
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(requested));
+            if (doc.RootElement.TryGetProperty("requestedAt", out var at) && DateTime.TryParse(at.GetString(), out var parsed)) asked = parsed;
+        }
+        catch { }
+        string? stage = null;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(progress));
+            if (doc.RootElement.TryGetProperty("stage", out var found)) stage = found.GetString();
+        }
+        catch { }
+        string adaptPath = AdaptFile.Location(model);
+        if (File.Exists(adaptPath) && File.GetLastWriteTime(adaptPath) >= asked.AddSeconds(-1))
+        {
+            adaptProgress.Text = "✓ 适配完成（" + File.GetLastWriteTime(adaptPath).ToString("HH:mm:ss") + " 写入，" + Profile.Covered + "/6 个部位）。";
+            adaptProgress.Foreground = new SolidColorBrush(Color.FromRgb(60, 120, 80));
+            return;
+        }
+        double minutes = (DateTime.Now - asked).TotalMinutes;
+        if (minutes > 10)
+        {
+            adaptProgress.Text = "⚠ 请求是 " + asked.ToString("HH:mm") + " 发出的，等了 " + (int)minutes + " 分钟还没有结果。可以再点一次「让 AI 调」，或去「动作与差分」页手动指定。";
+            adaptProgress.Foreground = new SolidColorBrush(Color.FromRgb(180, 90, 40));
+            return;
+        }
+        string phase = stage switch
+        {
+            "reading" => "🔍 AI 正在读取这个模型的差分与动作…",
+            "writing" => "✍ AI 正在写适配…",
+            "done" => "✓ AI 已写入，正在刷新…",
+            _ => "⏳ 已通知 AI，等待它来处理…",
+        };
+        adaptProgress.Text = phase + "（" + asked.ToString("HH:mm:ss") + " 发出）";
+        adaptProgress.Foreground = new SolidColorBrush(Color.FromRgb(60, 110, 150));
     }
 
     private void AskAi()
@@ -611,6 +699,7 @@ internal sealed class SettingsWindow : Window
     // local patch (模型适配): 这份档配了几个部位、全不全，写清楚并决定两个按钮露不露。
     private void RefreshAdaptStatus()
     {
+        RefreshAdaptProgress(); // local patch (模型适配): 进度行跟着一起刷新
         string? model = currentModel();
         bool exists = AdaptFile.Exists(model);
         var profile = Profile;
@@ -619,17 +708,18 @@ internal sealed class SettingsWindow : Window
         {
             askAi.Visibility = Visibility.Collapsed;
             adaptStatus.Text = "尚未选择模型。";
+            adaptProgress.Text = "";
             adaptStatus.Foreground = new SolidColorBrush(Color.FromRgb(120, 126, 148));
             return;
         }
-        // 内置模型的六个部位沿用原有配置，无需适配；更换其他模型时才需要。
+        // local patch (模型适配): 内置模型也留着「让 AI 调」——原有配置能用，但想重排或让 AI 检查一遍也行。
         bool native = Native(model);
-        askAi.Visibility = native ? Visibility.Collapsed : Visibility.Visible;
+        askAi.Visibility = Visibility.Visible;
         string asked = askedAt == null ? "" : "（已通知 AI，等待处理）";
         if (native)
         {
             string combos = profile.Combos.Count > 0 ? "（已为 " + profile.Combos.Count + " 个部位配置组合）" : "";
-            adaptStatus.Text = "✓ 内置模型，六个部位使用原有配置，无需适配。" + combos +
+            adaptStatus.Text = "✓ 内置模型，六个部位使用原有配置，无需适配；也可以点「让 AI 调」让 AI 重新检查一遍。" + combos +
                 (exists ? Environment.NewLine + AdaptFile.Location(model) : "");
             adaptStatus.Foreground = new SolidColorBrush(Color.FromRgb(60, 120, 80));
             return;
@@ -670,14 +760,20 @@ internal sealed class SettingsWindow : Window
         }
         // local patch (模型适配): 内置小动作仅内置模型提供；其他模型只列自身的差分与动作。
         if (Native(model)) AddPartGroup("内置小动作", Behavior.IdleNames.Select(name => (Kind: "mood", Name: name)));
-        // local patch (扩展包): 扩展带来的表情单独一组，跟内置分开看
-        var extended = Behavior.Moods.Keys.Where(name => Extensions.MoodSource.ContainsKey(name)).Order().ToArray();
-        if (Native(model) && extended.Length > 0) AddPartGroup("扩展表情", extended.Select(name => (Kind: "mood", Name: name)));
+        // local patch (扩展包): 扩展带来的东西一律按扩展清单现取，不写死谁有哪几个名字——
+        // 后装进来的包重扫一下就直接排在下面，页面本身可以往下滚。
+        var extended = Extensions.Moods.Keys.Order().ToArray();
+        if (extended.Length > 0) AddPartGroup("扩展表情", extended.Select(name => (Kind: "mood", Name: name)));
+        var extWords = Extensions.Words.Keys.Order().ToArray();
+        var extCombos = Extensions.Expansions.Keys.Order().ToArray();
+        var extAll = extWords.Concat(extCombos).ToArray();
+        if (extAll.Length > 0) AddPartGroup("扩展动作词", extAll.Select(name => (Kind: "word", Name: name)));
         AddPartGroup("差分", ModelParts.Expressions(model).Select(name => (Kind: "exp", Name: name)));
         AddPartGroup("动作", ModelParts.Motions(model).Select(name => (Kind: "motion", Name: name)));
         foreach (var (zone, _) in Zones) UpdateCombo(zone);
         RefreshDiffs();
         RefreshAdaptStatus();
+        UpdateExtNote();
     }
 
     // local patch (外观差分): 列表跟着当前模型走，勾上的就是常驻的。
@@ -823,9 +919,18 @@ internal sealed class SettingsWindow : Window
         if (model != null)
         {
             // local patch (模型适配): 内置反应仅内置模型提供；其他模型只列自身的差分与动作。
-            // local patch (扩展包): 扩展带来的表情注明是哪个包给的
-            if (Native(model)) foreach (var name in Behavior.Moods.Keys.Order())
-                triggers.Add(new("mood:" + name, Extensions.MoodSource.TryGetValue(name, out var from) ? "扩展 · " + Extensions.PackName(from) + "：" + name : "内置：" + name));
+            // local patch (扩展包): 扩展带来的表情注明是哪个包给的，换模型也照样能选。
+            foreach (var name in Behavior.Moods.Keys.Order())
+            {
+                bool fromPack = Extensions.MoodSource.ContainsKey(name);
+                if (!Native(model) && !fromPack) continue;
+                triggers.Add(new("mood:" + name, fromPack ? "扩展 · " + Extensions.PackName(Extensions.MoodSource[name]) + "：" + name : "内置：" + name));
+            }
+            // local patch (扩展包): 扩展动作词与组合词也进下拉，配到部位上就能点出来。
+            foreach (var name in Extensions.Words.Keys.Order())
+                triggers.Add(new("word:" + name, "扩展 · " + Extensions.PackName(Extensions.WordSource[name]) + "：" + name));
+            foreach (var name in Extensions.Expansions.Keys.Order())
+                triggers.Add(new("word:" + name, "扩展 · " + Extensions.PackName(Extensions.ExpansionSource[name]) + "：" + name));
             foreach (var name in ModelParts.Expressions(model)) triggers.Add(new("exp:" + name, "差分：" + name));
             foreach (var name in ModelParts.Motions(model)) triggers.Add(new("motion:" + name, "动作：" + name));
         }
@@ -872,10 +977,15 @@ internal sealed class SettingsWindow : Window
         };
         var kindText = new TextBlock
         {
-            Text = kind switch { "mood" => Extensions.MoodSource.ContainsKey(name) ? "扩展" : "内置", "exp" => "差分", _ => "动作" },
-            Width = 40, FontSize = 11, VerticalAlignment = VerticalAlignment.Center,
+            Text = kind switch { "mood" => Extensions.MoodSource.ContainsKey(name) ? "扩展" : "内置", "word" => "扩展词", "exp" => "差分", _ => "动作" },
+            Width = 46, FontSize = 11, VerticalAlignment = VerticalAlignment.Center,
             Foreground = new SolidColorBrush(Color.FromRgb(140, 146, 168)),
         };
+        // local patch (扩展包): 这一项是谁给的，鼠标停上去能看见。
+        if (kind == "word" && Extensions.WordSource.TryGetValue(name, out var wordPack))
+            kindText.ToolTip = "来自扩展包：" + Extensions.PackName(wordPack);
+        else if (kind == "mood" && Extensions.MoodSource.TryGetValue(name, out var moodPack))
+            kindText.ToolTip = "来自扩展包：" + Extensions.PackName(moodPack);
         var slider = new Slider { Minimum = 0, Maximum = 10, TickFrequency = 1, IsSnapToTickEnabled = true, Width = 120, Value = weight, VerticalAlignment = VerticalAlignment.Center };
         var number = new TextBlock { Text = weight.ToString(), Width = 22, FontSize = 12, Margin = new Thickness(6, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
         var tryIt = new Button { Content = "试", Padding = new Thickness(10, 1, 10, 1), Margin = new Thickness(10, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
@@ -1021,7 +1131,7 @@ internal sealed class ComboWindow : Window
         series.Checked += (_, _) => { if (series.IsChecked == true) parallel.IsChecked = false; };
         var note = new TextBlock
         {
-            Text = "「模式」用于设定默认开始方式：并行表示多条同时开始，连续表示前一条结束后再开始下一条。每条动作可单独指定「开始」：跟随模式 / 立即 / 等上一步 / 延迟。多个动作同时请求容易造成卡顿，建议使用「等上一步」或「延迟」错开。秒数表示该步骤持续时间（差分到时间关闭，动作按文件时长播放）。不保留任何条目并直接保存，表示该部位不使用组合。",
+            Text = "「模式」用于设定默认开始方式：并行表示多条同时开始，连续表示前一条结束后再开始下一条。每条动作可单独指定「开始」：跟随模式 / 立即 / 等上一步 / 延迟。多个动作同时请求容易造成卡顿，建议使用「等上一步」或「延迟」错开。秒数表示该步骤持续时间（差分到时间关闭，动作按文件时长播放）。扩展词按它自己写好的时间轴演一遍，秒数只作为最长停留参考。不保留任何条目并直接保存，表示该部位不使用组合。",
             TextWrapping = TextWrapping.Wrap, FontSize = 12, Margin = new Thickness(16, 2, 16, 6),
             Foreground = new SolidColorBrush(Color.FromRgb(120, 126, 148)),
         };
@@ -1062,8 +1172,9 @@ internal sealed class ComboWindow : Window
     private void AddRow(string kind, string? name, double seconds, string start, double delay)
     {
         var kindPick = new ComboBox { Width = 96, Margin = new Thickness(0, 0, 6, 0) };
-        kindPick.ItemsSource = new[] { "差分", "动作", "内置反应" };
-        kindPick.SelectedIndex = kind switch { "motion" => 1, "mood" => 2, _ => 0 };
+        // local patch (扩展包): 组合里也能放装进来的动作词。
+        kindPick.ItemsSource = new[] { "差分", "动作", "内置反应", "扩展词" };
+        kindPick.SelectedIndex = kind switch { "motion" => 1, "mood" => 2, "word" => 3, _ => 0 };
         var namePick = new ComboBox { Width = 200, Margin = new Thickness(0, 0, 6, 0) };
         var secondsBox = new TextBox { Width = 48, Text = seconds.ToString("0.#"), Margin = new Thickness(0, 0, 6, 0) };
         // local patch (组合动作): 这条什么时候开始
@@ -1078,6 +1189,8 @@ internal sealed class ComboWindow : Window
             {
                 1 => model == null ? new List<string>() : ModelParts.Motions(model).ToList(),
                 2 => Behavior.Moods.Keys.Order().ToList(),
+                // local patch (扩展包): 名字现从扩展清单里取，后装的包不用改代码。
+                3 => Extensions.Words.Keys.Concat(Extensions.Expansions.Keys).Order().ToList(),
                 _ => model == null ? new List<string>() : ModelParts.Expressions(model).ToList(),
             };
             namePick.ItemsSource = items;
@@ -1115,7 +1228,7 @@ internal sealed class ComboWindow : Window
             var startPick = (ComboBox)tag[3];
             var delayBox = (TextBox)tag[4];
             if (namePick.SelectedItem is not string name || string.IsNullOrWhiteSpace(name)) continue;
-            string kind = kindPick.SelectedIndex switch { 1 => "motion", 2 => "mood", _ => "exp" };
+            string kind = kindPick.SelectedIndex switch { 1 => "motion", 2 => "mood", 3 => "word", _ => "exp" };
             string start = startPick.SelectedIndex switch { 1 => "now", 2 => "after", 3 => "delay", _ => "" };
             double.TryParse(secondsBox.Text, out var seconds);
             double.TryParse(delayBox.Text, out var delay);

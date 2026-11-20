@@ -58,6 +58,8 @@ internal sealed class PetWindow : Window
     // 不然组合里放个内置反应，它结束时会把同一张差分顺手关掉（抢触发）。
     private long comboToken;
     private bool comboBusy;
+    // local patch (扩展包): 最近一次被点/试/空闲播放的扩展词，get_state 里能看见，方便确认它有没有走到播放。
+    private string? lastExtraWord;
     private readonly HashSet<string> comboExpressions = [];
     // 手写或 agent 写 JSON 常用小写键，读组合的时候不挑大小写。
     private static readonly JsonSerializerOptions RelaxedJson = new() { PropertyNameCaseInsensitive = true };
@@ -140,6 +142,8 @@ internal sealed class PetWindow : Window
             // local patch (模型页): 空闲池按设置页的启停和权重来，模型自带的差分与动作也在里面
             MoodWeight = IdleMoodWeight, IdleExtras = IdleExtras,
             PlayExtra = (kind, name) => SendPart(kind, name),
+            // local patch (扩展包): 扩展词没有动作文件，走身体那套参数轨道。
+            WordPlayer = PlayExtraWord,
             ClickChoice = ClickTriggerFor, // local patch (模型适配)
             PlayCombo = zone => _ = RunCombo(zone), // local patch (组合动作)
         };
@@ -205,6 +209,18 @@ internal sealed class PetWindow : Window
             int weight = PartWeight(profile, "motion:" + name);
             if (weight > 0) items.Add(new("motion", name, weight));
         }
+        // local patch (扩展包): 装进来的动作词与组合词也进空闲池，权重从动作页的勾选里读。
+        // 名字现从扩展清单里取，所以后加的包重扫一下就在这里出现，不用再动代码。
+        foreach (var name in Extensions.Words.Keys.Order())
+        {
+            int weight = PartWeight(profile, "word:" + name);
+            if (weight > 0) items.Add(new("word", name, weight));
+        }
+        foreach (var name in Extensions.Expansions.Keys.Order())
+        {
+            int weight = PartWeight(profile, "word:" + name);
+            if (weight > 0) items.Add(new("word", name, weight));
+        }
         return items;
     }
 
@@ -214,7 +230,8 @@ internal sealed class PetWindow : Window
     private int? IdleMoodWeight(string name)
     {
         // local patch (模型适配): 内置小动作是照着大肥鱼那套写的，换别的模型就不参与空闲。
-        if (!FitsBuiltins) return 0;
+        // local patch (扩展包): 扩展自己带来的表情不在这条限制里——它跟着模型写，由设置页决定权重。
+        if (!FitsBuiltins && !Extensions.MoodSource.ContainsKey(name)) return 0;
         var profile = adapt.Current(model);
         if (!profile.Idle.TryGetValue("mood:" + name, out var found)) return null;
         return found.On ? Math.Clamp(found.Weight, 0, 10) : 0;
@@ -296,6 +313,10 @@ internal sealed class PetWindow : Window
             case "mood":
                 behavior.Preview("mood", part.Name, DateTime.UtcNow);
                 break;
+            // local patch (扩展包): 组合里也能放一个扩展带来的动作词。
+            case "word":
+                PlayExtraWord(part.Name);
+                break;
             default:
                 Send($"exp {part.Name} 1");
                 _ = FadeComboExpression(token, part.Name, part.Seconds);
@@ -321,6 +342,8 @@ internal sealed class PetWindow : Window
         if (profile.Clicks.TryGetValue(zone, out var trigger) && !string.IsNullOrWhiteSpace(trigger) && ParseTrigger(trigger) is { } choice)
         {
             if (choice.Kind == "mood" && !Behavior.Moods.ContainsKey(choice.Name)) return null;
+            // local patch (扩展包): 词已经不在扩展里了（卸载或改名），就当没配。
+            if (choice.Kind == "word" && !Body.HasWord(choice.Name)) return null;
             return choice;
         }
         return FitsBuiltins ? null : ("none", "");
@@ -342,7 +365,8 @@ internal sealed class PetWindow : Window
         int at = value.IndexOf(':');
         if (at <= 0) return null;
         string kind = value[..at], name = value[(at + 1)..];
-        if (name.Length == 0 || kind is not ("mood" or "exp" or "motion")) return null;
+        // local patch (扩展包): word 是扩展带来的动作词，跟差分、动作一样能配在点击或组合里。
+        if (name.Length == 0 || kind is not ("mood" or "exp" or "motion" or "word")) return null;
         return (kind, name);
     }
 
@@ -381,8 +405,25 @@ internal sealed class PetWindow : Window
             File.WriteAllText(Path.Combine(folder, "adapt-request.json"), JsonSerializer.Serialize(request, new JsonSerializerOptions { WriteIndented = true }));
         }
         catch (Exception error) { Places.Log("适配请求没能落盘：" + error.Message); }
+        AdaptProgress("requested"); // local patch (模型适配): 让设置页能显示「已请求、等待中」
         Happened("adapt_request", new { model });
         bubbleStack.Say("正在请求 AI 为该模型的点击部位配置反应。");
+        // local patch (模型适配): 同时往聊天记录递一句，桥会把它交给会话——AI 不用等下一次工具调用才知道。
+        KeepChat("〔桌宠设置〕你在「模型与适配」页点了「让 AI 调」：请读 cache/adapt-request.json，用 adapt_model 给当前模型的六个点击部位配好动作，配完进度会变成完成。");
+    }
+
+    // local patch (模型适配): 把适配进行到哪一步落盘，设置页读它显示进度（请求 → 读取 → 写入 → 完成）。
+    private void AdaptProgress(string stage)
+    {
+        try
+        {
+            var folder = Path.Combine(Places.Root, "cache");
+            Directory.CreateDirectory(folder);
+            File.WriteAllText(Path.Combine(folder, "adapt-progress.json"),
+                JsonSerializer.Serialize(new { model, stage, at = DateTime.Now.ToString("s") },
+                    new JsonSerializerOptions { WriteIndented = true }));
+        }
+        catch (Exception error) { Places.Log("适配进度没能落盘：" + error.Message); }
     }
 
     // local patch (扩展包): 设置里点了某个包的「扩展适配」——包是按发布时的模型写的，换个模型
@@ -575,6 +616,8 @@ internal sealed class PetWindow : Window
         string action = args.TryGetProperty("action", out var kind) && kind.ValueKind == JsonValueKind.String ? kind.GetString()! : "read";
         var profile = adapt.Current(model);
         if (action == "read")
+        {
+            AdaptProgress("reading"); // local patch (模型适配): 设置页显示「AI 正在读取模型」
             return new
             {
                 model, label = Path.GetFileName(model), native = FitsBuiltins,
@@ -586,10 +629,12 @@ internal sealed class PetWindow : Window
                 missingZones = Settings.Zones.Where(zone => !profile.Clicks.ContainsKey(zone) && !profile.Combos.ContainsKey(zone)).ToArray(),
                 current = new { clicks = profile.Clicks, combos = profile.Combos, worn = profile.Worn, idle = profile.Idle },
             };
+        }
         if (action == "reset")
         {
             adapt.ResetCurrent();
             adaptToldAt = adaptAskedAt;
+            AdaptProgress("done");
             return new { reset = true, model, profile = AdaptFile.Location(model) };
         }
         if (action != "write") throw new ArgumentException("action 只能是 read、write 或 reset。");
@@ -641,7 +686,7 @@ internal sealed class PetWindow : Window
         if (args.TryGetProperty("idle", out var idle) && idle.ValueKind == JsonValueKind.Object)
             foreach (var item in idle.EnumerateObject())
             {
-                if (!System.Text.RegularExpressions.Regex.IsMatch(item.Name, "^(mood|exp|motion):.+$")) continue;
+                if (!System.Text.RegularExpressions.Regex.IsMatch(item.Name, "^(mood|exp|motion|word):.+$")) continue; // local patch (扩展包)
                 bool on = true; int weight = 1;
                 if (item.Value.ValueKind == JsonValueKind.Number && item.Value.TryGetInt32(out int number)) weight = number;
                 else if (item.Value.ValueKind == JsonValueKind.Object)
@@ -655,6 +700,7 @@ internal sealed class PetWindow : Window
         profile.AdaptedAt = DateTime.Now;
         profile.AdaptedBy = "ai";
         adapt.Save();
+        AdaptProgress("done"); // local patch (模型适配): 设置页显示「已完成」
         adaptToldAt = adaptAskedAt; // 配完了就不再每回都提醒
         return new { saved = true, model, profile = AdaptFile.Location(model), changed, covered = profile.Covered, adapted = profile.Adapted, warnings };
     }
@@ -669,6 +715,7 @@ internal sealed class PetWindow : Window
             "mood" => Behavior.Moods.ContainsKey(choice.Name),
             "exp" => model != null && ModelParts.Expressions(model).Contains(choice.Name),
             "motion" => model != null && ModelParts.Motions(model).Contains(choice.Name),
+            "word" => Body.HasWord(choice.Name), // local patch (扩展包)
             _ => false,
         };
     }
@@ -691,6 +738,18 @@ internal sealed class PetWindow : Window
     private void PreviewPart(string kind, string name)
     {
         if (player != null) behavior.Preview(kind, name, DateTime.UtcNow);
+    }
+
+    // local patch (扩展包): 扩展带来的动作词（含组合词）当成一句只有动作的话说一遍，
+    // 让身体按它自己的轨道演；名字不认识就退回原来的样子，不算播放成功。
+    // 注意：Body.Apply 只吃〔〕里面的内容，整句连括号递进去会被当成一个不认识的词整句跳过；
+    // 所以这里走 PlaySilently 那条与说话相同的拆句路径。
+    private bool PlayExtraWord(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name) || !Body.HasWord(name)) return false;
+        lastExtraWord = name;
+        PlaySilently("〔" + name + "〕", filmed: false);
+        return true;
     }
 
     // local patch (模型页): 换模型——她先隐去，旧渲染器关掉，新模型按同样的位置和设置出来。
@@ -1590,6 +1649,7 @@ internal sealed class PetWindow : Window
         check_updates = settings.CheckUpdates,
         update = updates.Latest is { } found ? new { current = found.Current, latest = found.Latest, behind = found.Behind, changes = found.Changes, guide = found.Guide } : null,
         idle_seconds = settings.IdleSeconds, position = new { Left, Top }, saying = speech.IsSaying, reaction = behavior.Showing, trouble,
+        last_extra_word = lastExtraWord, posing = body.Posing, // local patch (扩展包): 最近播放的扩展词 / 她是不是正摆着姿势
         model = model, // local patch (模型页)
         // local patch (不丢字): 还有几句用户打的字没被读过；chat_log 是落盘的那份，进程重启也读得到
         unread_chat = unreadChat, chat_log = Path.Combine(Places.Root, "cache", "chat.log"), session_target = settings.SessionTarget,

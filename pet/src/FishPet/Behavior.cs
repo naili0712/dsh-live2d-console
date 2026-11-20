@@ -61,12 +61,19 @@ internal sealed class Behavior
     internal static IReadOnlyList<string> IdleNames => IdleMoods;
 
     // local patch (扩展包): 装进来的表情并进表情池；内置同名优先，扩展只补没占的名字。
+    // local patch (扩展包修复): 以前扩展一进来就把内置整张表顶掉，内置那十一个表情与小动作会集体消失；
+    // 现在两份合成一份，扩展只往后补。
     private static Dictionary<string, Mood> extraMoods = [];
-    internal static IReadOnlyDictionary<string, Mood> Moods => extraMoods.Count == 0 ? BuiltinMoods : extraMoods;
+    private static IReadOnlyDictionary<string, Mood> mergedMoods = BuiltinMoods;
+    internal static IReadOnlyDictionary<string, Mood> Moods => mergedMoods;
     internal static void UseExtraMoods(IReadOnlyDictionary<string, ExtensionMood> defs)
     {
         extraMoods = defs.Where(pair => !BuiltinMoods.ContainsKey(pair.Key))
             .ToDictionary(pair => pair.Key, pair => Build(pair.Value), StringComparer.Ordinal);
+        if (extraMoods.Count == 0) { mergedMoods = BuiltinMoods; return; }
+        var all = new Dictionary<string, Mood>(BuiltinMoods, StringComparer.Ordinal);
+        foreach (var (name, mood) in extraMoods) all[name] = mood;
+        mergedMoods = all;
     }
     private static Mood Build(ExtensionMood def) => new(
         def.Expressions?.ToArray() ?? [],
@@ -105,6 +112,8 @@ internal sealed class Behavior
     internal Func<IReadOnlyList<IdleItem>>? IdleExtras { get; init; }
     // local patch (模型页): 真去放一个动作；差分由这里自己开关。
     internal Action<string, string>? PlayExtra { get; init; }
+    // local patch (扩展包): 扩展带来的动作词交给身体去演（合成的词再回 Body 展开），返回认不认这个名字。
+    internal Func<string, bool>? WordPlayer { get; init; }
     // local patch (模型页): 点她哪个位置演什么，由设置页决定；null = 原来的样子。
     internal Func<string, (string Kind, string Name)?>? ClickChoice { get; init; }
     // local patch (组合动作): 这个部位配了组合，交给窗口按并行/连续去演；name 是部位。
@@ -309,6 +318,7 @@ internal sealed class Behavior
     {
         if (kind == "exp") { ShowExpression(name, now); return; }
         if (kind == "motion") PlayExtra?.Invoke(kind, name);
+        if (kind == "word") WordPlayer?.Invoke(name);
     }
 
     private void ShowExpression(string name, DateTime now)
@@ -324,6 +334,7 @@ internal sealed class Behavior
     {
         if (kind == "mood") { Show(name, now); return; }
         if (kind == "exp") { ShowExpression(name, now); return; }
+        if (kind == "word") { WordPlayer?.Invoke(name); return; }
         PlayExtra?.Invoke(kind, name);
     }
 
