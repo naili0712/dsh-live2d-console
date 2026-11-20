@@ -52,6 +52,11 @@ internal sealed class BubbleWindow : Window
 {
     private readonly PetWindow pet; // local patch (多屏): 跟着她所在的那块屏幕
     private readonly Func<double> headTop;
+    // local patch (气泡叠加): 挂在她身上的订阅，收走时解开，否则每说一句都多一个窗口跟着她跑。
+    private readonly EventHandler moved;
+    private readonly SizeChangedEventHandler sized;
+    // local patch (气泡叠加): 已经收走的窗口不再收第二次（点掉和到时可能会碰在一起）。
+    private bool dismissed;
     internal TextBlock Text { get; } = new()
     {
         TextWrapping = TextWrapping.Wrap, FontSize = 15, Foreground = new SolidColorBrush(Color.FromRgb(50, 56, 84)),
@@ -70,9 +75,11 @@ internal sealed class BubbleWindow : Window
             // Never activated, not in Alt+Tab.
             SetWindowLongPtr(handle, -20, (nint)((long)GetWindowLongPtr(handle, -20) | 0x8000080));
         };
+        moved = (_, _) => Place();
+        sized = (_, _) => Place();
         SizeChanged += (_, _) => { Place(); pet.BubbleResized(this); };
-        pet.LocationChanged += (_, _) => Place();
-        pet.SizeChanged += (_, _) => Place();
+        pet.LocationChanged += moved;
+        pet.SizeChanged += sized;
         // A click on the bubble closes it, and only it. local patch (气泡叠加): 点哪个收哪个，不连累别的句子。
         MouseLeftButtonUp += (_, _) => { Hide(); pet.BubbleClicked(this); };
     }
@@ -88,6 +95,9 @@ internal sealed class BubbleWindow : Window
 
     internal bool Expired => DateTime.UtcNow >= HideAt;
 
+    // local patch (气泡叠加): 排布时量位置：刚开口的窗口还没走完布局，先用它期望的高度顶上。
+    internal double LaidOutHeight => ActualHeight > 0 ? ActualHeight : DesiredSize.Height;
+
     // How big the bubble is (settings: bubble_scale): the words, the outline and how wide it may grow, together.
     internal double Scale
     {
@@ -101,9 +111,31 @@ internal sealed class BubbleWindow : Window
         Place();
     }
 
+    // local patch (气泡叠加): 收走：藏、关、解开订阅。到时的、点掉的、被顶掉的最旧的都走这里。
+    internal void Dismiss()
+    {
+        if (dismissed) return;
+        dismissed = true;
+        pet.LocationChanged -= moved;
+        pet.SizeChanged -= sized;
+        HideAt = DateTime.MinValue;
+        try
+        {
+            if (IsVisible) Hide();
+            Close();
+        }
+        catch (InvalidOperationException) { }
+    }
+
+    // local patch (气泡叠加): 这一句没有期限（没说完就被下一句接过去了），给它一个，别一直挂在头顶。
+    internal void Release()
+    {
+        if (HideAt == DateTime.MaxValue) HideAt = DateTime.UtcNow + Speech.StaysFor(Text.Text);
+    }
+
     internal void Place()
     {
-        if (!IsVisible) return;
+        if (!IsVisible || dismissed) return;
         var area = pet.Screen(); // local patch (多屏): 气泡跟到她所在的那块屏幕
         double left = pet.Left + pet.Width / 2 - ActualWidth / 2;
         // local patch (气泡叠加): 往上让出这一叠里前面几个气泡的位置。
@@ -123,7 +155,7 @@ internal sealed class BubbleWindow : Window
 // 多了把最旧的收走。点哪个收哪个。她自己的提示语也走这里。
 internal sealed class BubbleStack
 {
-    private const int Most = 4;
+    private const int Most = 3; // local patch (气泡叠加): 一叠高过屏幕顶时，Reflow 会把最旧的收走，不等这个数。
     private const double Gap = 8;
     private readonly PetWindow pet;
     private readonly Func<double> headTop;
@@ -155,37 +187,58 @@ internal sealed class BubbleStack
         window.Scale = scale;
         windows.Add(window);
         while (windows.Count > Most) Drop(0);
+        // local patch (气泡叠加): 新的一句开口就把旧的让上去，不等它自己量完再压在一起。
+        Reflow();
         return window;
     }
 
     internal void Closed(BubbleWindow window)
     {
-        if (windows.Remove(window)) Reflow();
+        if (!windows.Remove(window)) return;
+        window.Dismiss();
+        Reflow();
     }
 
     internal void HideAll()
     {
-        foreach (var window in windows) window.Hide();
+        foreach (var window in windows) window.Dismiss();
         windows.Clear();
     }
 
     // 到时间的气泡收走，剩下的往上让位。
     internal void Tick()
     {
-        bool gone = windows.RemoveAll(window => window.Expired) > 0;
+        bool gone = false;
+        for (int i = windows.Count - 1; i >= 0; i--)
+        {
+            if (!windows[i].Expired) continue;
+            // local patch (气泡叠加): 光从那一叠里移走不够，窗口还开着、还留在屏幕上，必须收掉。
+            windows[i].Dismiss();
+            windows.RemoveAt(i);
+            gone = true;
+        }
         if (gone) Reflow();
     }
 
-    // 从最新（贴着头顶）往上排，越旧越靠上。
+    // 从最新（贴着头顶）往上排，越旧越靠上；一叠高过屏幕顶的，最旧的先收走。
     internal void Reflow()
     {
-        double offset = 0;
-        for (int i = windows.Count - 1; i >= 0; i--)
+        if (windows.Count == 0) return;
+        for (int guard = 0; guard <= Most; guard++)
         {
-            var window = windows[i];
-            window.StackOffset = offset;
-            window.Place();
-            offset += window.ActualHeight + Gap;
+            var area = pet.Screen();
+            double room = pet.Top + headTop() - area.Top - 6;
+            double offset = 0;
+            for (int i = windows.Count - 1; i >= 0; i--)
+            {
+                var window = windows[i];
+                window.StackOffset = offset;
+                window.Place();
+                offset += window.LaidOutHeight + Gap;
+            }
+            // local patch (气泡叠加): 放不下就收掉最旧的一句，别再往上挤到屏幕外、全叠在一处。
+            if (windows.Count <= 1 || offset - Gap <= room) return;
+            Drop(0);
         }
     }
 
@@ -193,7 +246,7 @@ internal sealed class BubbleStack
     {
         var window = windows[index];
         windows.RemoveAt(index);
-        window.Hide();
+        window.Dismiss();
     }
 }
 
@@ -211,6 +264,8 @@ internal sealed class Speech
     // words; -1 keeps it until her next line or a click.
     internal static TimeSpan StaysFor(string words) => TimeSpan.FromSeconds(Math.Clamp(4 + words.Length * .15, 5, 20));
     internal int Seconds { get; set; }
+    // local patch (气泡叠加): 收走自己的气泡要经过头顶那一叠。
+    internal BubbleStack? Stack { get; set; }
 
     internal Speech()
     {
@@ -225,6 +280,12 @@ internal sealed class Speech
 
     internal void Say(Line said, BubbleWindow target)
     {
+        // local patch (气泡叠加): 上一句没念完就被这句接过去：把它的整句放上、给它自己的期限，别永远挂在头顶。
+        if (bubble is { } before)
+        {
+            if (Words.Length > 0) before.Say(Words);
+            before.Release();
+        }
         line = said; bubble = target; shown = 0;
         elapsed.Restart();
         timer.Start();
@@ -264,7 +325,11 @@ internal sealed class Speech
     internal void Stop()
     {
         timer.Stop();
-        if (bubble is { } window) { window.Hide(); window.HideAt = DateTime.MinValue; }
-        bubble = null;
+        if (bubble is { } window)
+        {
+            bubble = null;
+            // local patch (气泡叠加): 停下就收走，并且从那一叠里移开，别留一个看不见的窗口占着位置。
+            if (Stack is { } stack) stack.Closed(window); else window.Dismiss();
+        }
     }
 }

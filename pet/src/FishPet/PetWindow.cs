@@ -131,7 +131,7 @@ internal sealed class PetWindow : Window
         Content = new Grid { Children = { image } };
         bubbleStack = new BubbleStack(this, () => Height * Shape.HeadTop) { Quiet = test }; // local patch (气泡叠加)
         bubbleStack.Scale = settings.BubbleScale;
-        speech = new Speech { Seconds = settings.BubbleSeconds };
+        speech = new Speech { Seconds = settings.BubbleSeconds, Stack = bubbleStack }; // local patch (气泡叠加)
         body = new Body(Send);
         updates = new Updates(Places.Root, Places.Log);
         behavior = new Behavior(Send, () => [.. settings.Outfit, .. body.Overlays, .. comboExpressions], new Random())
