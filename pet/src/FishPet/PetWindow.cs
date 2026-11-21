@@ -70,6 +70,10 @@ internal sealed class PetWindow : Window
     // Dragging her about.
     private bool dragging, dragged;
     private bool lockedNow; // local patch (锁定位置): 这次按下时她是不是被锁着
+    private DateTime nextTopCheck; // local patch (置顶): 上次把她推回最上层的时间
+    // local patch (置顶): F6 全局热键——注册结果与编号，打游戏时不用退出来右键她。
+    private const int HotkeyId = 0x4656;
+    private bool hotkey;
     private Point dragStart, windowStart;
 
     // What the window does to her: moving pushes her body, the taskbar hides what reaches it.
@@ -156,6 +160,11 @@ internal sealed class PetWindow : Window
             var handle = new WindowInteropHelper(this).Handle;
             // Never takes the focus from what the user is doing, not in Alt+Tab.
             SetWindowLongPtr(handle, -20, (nint)((long)GetWindowLongPtr(handle, -20) | 0x8000080));
+            // local patch (置顶): 全局热键（默认 F6，设置页可改）一键开关「固定屏幕顶部」；
+            // 固定时整扇窗鼠标穿透，不挡游戏里的点击。
+            ApplyHotkey();
+            if (HwndSource.FromHwnd(handle) is { } source) source.AddHook(HotkeyMessage);
+            ApplyClickThrough();
         };
         Loaded += (_, _) =>
         {
@@ -187,7 +196,7 @@ internal sealed class PetWindow : Window
         // local patch (托盘): 再启动一次 exe（快捷方式/开始菜单）时，把已经收起来的她叫出来。
         var wake = new EventWaitHandle(false, EventResetMode.AutoReset, "FishPet.Show." + Tools.PipeName);
         new Thread(() => { while (wake.WaitOne()) Dispatcher.BeginInvoke(new Action(ShowFromTray)); }) { IsBackground = true, Name = "FishPet.Show" }.Start();
-        tray = new PetTray(ShowFromTray, OpenSettings, QuitForGood);
+        tray = new PetTray(ShowFromTray, OpenSettings, QuitForGood, TogglePinTop, () => settings.PinTop); // local patch (置顶): 托盘也能开关
         tray.Hint("dshlive2d控制台");
     }
 
@@ -902,6 +911,12 @@ internal sealed class PetWindow : Window
     private void Tick()
     {
         GoWithAgent();
+        // local patch (置顶): 固定屏幕顶部时定期把她推回最上层——别的置顶窗口（包括全屏游戏）一切前台就会把层级抢走。
+        if (settings.PinTop && !test && !trayHidden && DateTime.UtcNow >= nextTopCheck)
+        {
+            nextTopCheck = DateTime.UtcNow.AddMilliseconds(400);
+            KeepOnTop();
+        }
         if (player is not { } current) return;
         if (trayHidden) return; // local patch (托盘): 收起来了就不动
         CheckSayFile(); // local patch (桥): 桥接插件让她说的话
@@ -969,7 +984,7 @@ internal sealed class PetWindow : Window
     private void UpdateFullscreen(Player current)
     {
         // local patch (全屏): 只有盖住她所在那块屏的全屏窗口才让她让开
-        bool covered = settings.HideOnFullscreen && !test && Fullscreen.Covers(new WindowInteropHelper(this).Handle);
+        bool covered = settings.HideOnFullscreen && !settings.PinTop && !test && Fullscreen.Covers(new WindowInteropHelper(this).Handle); // local patch (置顶): 固定屏幕顶部时全屏也不躲
         if (covered == hiddenForFullscreen) return;
         hiddenForFullscreen = covered;
         current.Send($"pause {(covered ? 1 : 0)}");
@@ -1099,6 +1114,8 @@ internal sealed class PetWindow : Window
         items.Add(("放大", () => Zoom(.05)));
         items.Add(("缩小", () => Zoom(-.05)));
         items.Add(("-", null));
+        // local patch (置顶): 一键钉在最上层，全屏的游戏、视频也盖不住她
+        items.Add(((settings.PinTop ? "✓ " : "   ") + "固定屏幕顶部", TogglePinTop));
         items.Add(((settings.LockPosition ? "✓ " : "   ") + "锁定位置（点击不会变成拖动）", ToggleLock));
         items.Add(("设置…", OpenSettings));
         items.Add(("隐藏", HideToTray));
@@ -1112,6 +1129,61 @@ internal sealed class PetWindow : Window
         settings.LockPosition = !settings.LockPosition;
         settings.Save();
         tray?.Hint(settings.LockPosition ? "dshlive2d控制台（位置已锁）" : "dshlive2d控制台");
+    }
+
+    // local patch (置顶): F6、右键菜单、托盘都走这里。开着时她钉在最上层、整扇窗鼠标穿透，
+    // 打游戏点哪打哪都不会被她挡掉；关掉就回到「别的程序全屏时躲开」的老样子。
+    private void TogglePinTop()
+    {
+        settings.PinTop = !settings.PinTop;
+        settings.Save();
+        ApplyClickThrough();
+        nextFullscreenLook = default; // 下一拍就按新设置重新看一次全屏；原来躲着的她会自己回来
+        if (settings.PinTop) KeepOnTop();
+        tray?.Hint(settings.PinTop ? "dshlive2d控制台（已固定屏幕顶部，鼠标穿透中，按 " + settings.PinHotkey + " 取消）" : "dshlive2d控制台（已取消固定）");
+    }
+
+    // local patch (置顶): 固定时给窗口加 WS_EX_TRANSPARENT——鼠标点她身上也直接落到底下的窗口，
+    // 不挡住游戏操作。代价是这段时间点不到她，要关回来按 F6（或从托盘菜单）。
+    private void ApplyClickThrough()
+    {
+        var handle = new WindowInteropHelper(this).Handle;
+        if (handle == 0) return;
+        long style = (long)GetWindowLongPtr(handle, -20);
+        style = settings.PinTop ? style | 0x20 : style & ~0x20L; // WS_EX_TRANSPARENT
+        SetWindowLongPtr(handle, -20, (nint)style);
+    }
+
+    // local patch (置顶): 按设置注册全局热键；设置页换键时先撤旧的再注册新的。
+    private void ApplyHotkey()
+    {
+        var handle = new WindowInteropHelper(this).Handle;
+        if (handle == 0) return;
+        if (hotkey) { UnregisterHotKey(handle, HotkeyId); hotkey = false; }
+        if (!Hotkey.TryParse(settings.PinHotkey, out var modifiers, out var key)) return;
+        hotkey = RegisterHotKey(handle, HotkeyId, modifiers, key);
+        if (!hotkey) Places.Log("热键「" + settings.PinHotkey + "」注册失败，可能被别的程序占用了；右键菜单和托盘还能开关固定屏幕顶部。");
+    }
+
+    // local patch (置顶): 热键是全局的，前台是游戏也收得到。
+    private nint HotkeyMessage(nint hwnd, int message, nint wParam, nint lParam, ref bool handled)
+    {
+        if (message == 0x0312 && (int)wParam == HotkeyId)
+        {
+            TogglePinTop();
+            handled = true;
+        }
+        return 0;
+    }
+
+    // local patch (置顶): 把她重新推到最上层。不挪位置、不抢焦点——游戏不会被打断，
+    // 别的置顶窗口抢走层级后靠 Tick 里每隔一会儿再推一次。
+    private void KeepOnTop()
+    {
+        if (!IsVisible) return;
+        var handle = new WindowInteropHelper(this).Handle;
+        if (handle == 0) return;
+        SetWindowPos(handle, -1, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010); // HWND_TOPMOST, 不改大小/位置、不激活
     }
 
     private void Wheel(object sender, MouseWheelEventArgs e)
@@ -1420,6 +1492,7 @@ internal sealed class PetWindow : Window
         bubbleStack.Scale = settings.BubbleScale;
         speech.Seconds = settings.BubbleSeconds;
         nextFullscreenLook = default;
+        ApplyHotkey(); // local patch (置顶): 设置页里换了快捷键，立刻按新的注册
         if (player != null && appliedShape != Shape.Find(settings.Shape).Id) SetShape(settings.Shape);
         settings.Save();
         UpdateCut();
@@ -1605,6 +1678,11 @@ internal sealed class PetWindow : Window
                 {
                     settings.HideOnFullscreen = hide.GetBoolean(); nextFullscreenLook = default;
                 }
+                // local patch (置顶): agent 也能开关「固定屏幕顶部」
+                if (args.TryGetProperty("pin_top", out var pin) && pin.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                {
+                    settings.PinTop = pin.GetBoolean(); nextFullscreenLook = default; ApplyClickThrough(); KeepOnTop();
+                }
                 if (args.TryGetProperty("check_updates", out var check) && check.ValueKind is JsonValueKind.True or JsonValueKind.False) settings.CheckUpdates = check.GetBoolean();
                 if (args.TryGetProperty("follow_mouse", out var follow) && follow.ValueKind is JsonValueKind.True or JsonValueKind.False) settings.FollowMouse = follow.GetBoolean();
                 if (args.TryGetProperty("lock_position", out var lockPos) && lockPos.ValueKind is JsonValueKind.True or JsonValueKind.False) settings.LockPosition = lockPos.GetBoolean(); // local patch (锁定位置)
@@ -1645,7 +1723,7 @@ internal sealed class PetWindow : Window
     private object State() => new
     {
         shape = settings.Shape, shapeLabel = Shape.Label, wearing = Wearing(), fps = settings.Fps, scale = settings.Scale, bubble_scale = settings.BubbleScale, bubble_seconds = settings.BubbleSeconds,
-        hide_on_fullscreen = settings.HideOnFullscreen, hidden_for_fullscreen = hiddenForFullscreen, follow_mouse = settings.FollowMouse,
+        hide_on_fullscreen = settings.HideOnFullscreen, hidden_for_fullscreen = hiddenForFullscreen, pin_top = settings.PinTop, pin_hotkey = settings.PinHotkey, follow_mouse = settings.FollowMouse,
         check_updates = settings.CheckUpdates,
         update = updates.Latest is { } found ? new { current = found.Current, latest = found.Latest, behind = found.Behind, changes = found.Changes, guide = found.Guide } : null,
         idle_seconds = settings.IdleSeconds, position = new { Left, Top }, saying = speech.IsSaying, reaction = behavior.Showing, trouble,
@@ -1668,6 +1746,14 @@ internal sealed class PetWindow : Window
     private static extern nint MonitorFromWindow(nint window, uint flags);
     [DllImport("user32.dll")]
     private static extern nint MonitorFromPoint(NativePoint point, uint flags);
+    // local patch (置顶): 把窗口提到最上层 / 保持置顶用
+    [DllImport("user32.dll")]
+    private static extern bool SetWindowPos(nint window, nint after, int x, int y, int width, int height, uint flags);
+    // local patch (置顶): 全局热键
+    [DllImport("user32.dll")]
+    private static extern bool RegisterHotKey(nint window, int id, uint modifiers, uint key);
+    [DllImport("user32.dll")]
+    private static extern bool UnregisterHotKey(nint window, int id);
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
     private static extern nint GetWindowLongPtr(nint hwnd, int index);
     [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")]

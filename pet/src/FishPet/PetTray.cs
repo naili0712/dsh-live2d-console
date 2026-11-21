@@ -10,11 +10,16 @@ internal sealed class PetTray : IDisposable
     private readonly NotifyIcon icon;
     private readonly Action show;
 
-    internal PetTray(Action show, Action settings, Action quit)
+    internal PetTray(Action show, Action settings, Action quit, Action pinToggle, Func<bool> pinned)
     {
         this.show = show;
         var menu = new ContextMenuStrip { ShowImageMargin = false };
         menu.Items.Add("显示角色", null, (_, _) => show());
+        // local patch (置顶): 固定时鼠标穿透、点不到她，留一条托盘入口来开关
+        var pin = new ToolStripMenuItem("固定屏幕顶部");
+        pin.Click += (_, _) => { pinToggle(); pin.Checked = pinned(); };
+        menu.Items.Add(pin);
+        menu.Opening += (_, _) => pin.Checked = pinned();
         menu.Items.Add("设置…", null, (_, _) => settings());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("退出", null, (_, _) => quit());

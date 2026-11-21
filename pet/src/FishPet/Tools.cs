@@ -56,8 +56,10 @@ internal static class Tools
         Tool("update_settings", "修改设置，仅修改传入的项并保存。shape 体型：small（小只，默认）、chibi（Q 版）、full（全身）；fps 帧率：30、60、90、120；" +
             "scale 大小 0.5–2；bubble_scale 气泡大小 0.5–2（文字与气泡同步缩放，与 scale 无关）；bubble_seconds 气泡在说完后停留时间：0 为按字数自动（5–20 秒，默认），" +
             "5–180 为固定秒数，-1 为保留到下一句或点击关闭；hide_on_fullscreen 其他程序全屏（游戏、视频）时隐藏且不渲染，默认开启；" +
+            // local patch (置顶): 固定屏幕顶部，agent 也能开关
+            "pin_top 固定屏幕顶部（一直盖在别的窗口上，全屏游戏也不躲），默认关闭；" +
             "follow_mouse 视线跟随鼠标；idle_seconds 无交互时执行小动作的间隔（15–600 秒）；check_updates 启动时及每 12 小时检查 GitHub 是否有新版本，默认开启。",
-            """{"shape":{"type":"string","enum":["small","chibi","full"]},"fps":{"type":"integer","enum":[30,60,90,120]},"scale":{"type":"number","minimum":0.5,"maximum":2},"bubble_scale":{"type":"number","minimum":0.5,"maximum":2},"bubble_seconds":{"type":"integer","minimum":-1,"maximum":180},"hide_on_fullscreen":{"type":"boolean"},"follow_mouse":{"type":"boolean"},"lock_position":{"type":"boolean"},"idle_seconds":{"type":"integer","minimum":15,"maximum":600},"check_updates":{"type":"boolean"}}""", []),
+            """{"shape":{"type":"string","enum":["small","chibi","full"]},"fps":{"type":"integer","enum":[30,60,90,120]},"scale":{"type":"number","minimum":0.5,"maximum":2},"bubble_scale":{"type":"number","minimum":0.5,"maximum":2},"bubble_seconds":{"type":"integer","minimum":-1,"maximum":180},"hide_on_fullscreen":{"type":"boolean"},"pin_top":{"type":"boolean"},"follow_mouse":{"type":"boolean"},"lock_position":{"type":"boolean"},"idle_seconds":{"type":"integer","minimum":15,"maximum":600},"check_updates":{"type":"boolean"}}""", []),
         // local patch (桌上对话): user_says = 用户在桌上输入框里打给她的那句话。
         // local patch (设置面板): 让 agent 也能替用户把设置打开
         Tool("open_settings", "打开角色设置面板（包含体型、大小、气泡、帧率、启动与会话指向等选项）。", "{}"),

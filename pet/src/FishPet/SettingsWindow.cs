@@ -6,6 +6,7 @@ using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Input; // local patch (置顶): 捕获快捷键
 using Microsoft.Win32;
 
 namespace FishPet;
@@ -42,6 +43,9 @@ internal sealed class SettingsWindow : Window
     private readonly CheckBox hide = new() { Content = "其他程序全屏时隐藏" };
     private readonly CheckBox auto = new() { Content = "登录 Windows 时自动启动" };
     private readonly CheckBox lockPos = new() { Content = "固定位置（点击不会变成拖动）" }; // local patch (锁定位置)
+    // local patch (置顶): 「固定屏幕顶部」的全局快捷键，点进框里按一下就能换
+    private readonly TextBox pinKey = new() { Width = 150, VerticalAlignment = VerticalAlignment.Center };
+    private readonly TextBlock pinHint = new() { TextWrapping = TextWrapping.Wrap, FontSize = 12, Margin = new Thickness(0, 2, 0, 4), Foreground = new SolidColorBrush(Color.FromRgb(120, 126, 148)) };
     private readonly ComboBox session = new() { Width = 250, IsEditable = true };
     private readonly TextBlock note = new() { TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = new SolidColorBrush(Color.FromRgb(120, 126, 148)) };
     // local patch (模型页): 模型下拉、当前模型说明
@@ -122,6 +126,21 @@ internal sealed class SettingsWindow : Window
         hide.IsChecked = settings.HideOnFullscreen;
         auto.IsChecked = settings.AutoStart;
         lockPos.IsChecked = settings.LockPosition;
+        // local patch (置顶): 快捷键框——按一下组合键就换成新的；Esc 放弃。
+        pinKey.Text = settings.PinHotkey;
+        pinHint.Text = "点进框里按一下要用的键（F1–F12，或 Ctrl/Alt/Shift 组合）。固定时鼠标会穿透她、不挡游戏操作，再按这个键取消。";
+        pinKey.PreviewKeyDown += (sender, e) =>
+        {
+            e.Handled = true;
+            var key = e.Key == Key.System ? e.SystemKey : e.Key;
+            if (key is Key.LeftCtrl or Key.RightCtrl or Key.LeftAlt or Key.RightAlt or Key.LeftShift or Key.RightShift or Key.LWin or Key.RWin or Key.None) return;
+            if (key == Key.Escape) { pinKey.Text = settings.PinHotkey; return; }
+            var text = Hotkey.Format(key, Keyboard.Modifiers);
+            if (!Hotkey.TryParse(text, out _, out _)) { pinHint.Text = "「" + text + "」不行：只认 F1–F24，或者带 Ctrl/Alt/Shift 的组合。"; return; }
+            pinKey.Text = text;
+            pinHint.Text = "点进框里按一下要用的键（F1–F12，或 Ctrl/Alt/Shift 组合）。固定时鼠标会穿透她、不挡游戏操作，再按这个键取消。";
+            Touch(null, EventArgs.Empty);
+        };
         session.ItemsSource = RecentSessions();
         session.Text = settings.SessionTarget ?? "";
         scaleText.Text = scale.Value.ToString("0.00");
@@ -152,6 +171,9 @@ internal sealed class SettingsWindow : Window
         panel.Children.Add(Row("", follow));
         panel.Children.Add(Row("", hide));
         panel.Children.Add(Row("", lockPos));
+        // local patch (置顶): 快捷键可以换成别的键
+        panel.Children.Add(Row("固定屏幕顶部快捷键", pinKey, 170));
+        panel.Children.Add(pinHint);
         panel.Children.Add(Row("空闲小动作", With(idle, idleText)));
         panel.Children.Add(Group("启动"));
         panel.Children.Add(Row("", auto));
@@ -208,6 +230,7 @@ internal sealed class SettingsWindow : Window
         hide.Checked += Touch; hide.Unchecked += Touch;
         auto.Checked += Touch; auto.Unchecked += Touch;
         lockPos.Checked += Touch; lockPos.Unchecked += Touch;
+        pinKey.LostFocus += Touch; // local patch (置顶)
         session.LostFocus += Touch;
         ready = true;
     }
@@ -1018,10 +1041,10 @@ internal sealed class SettingsWindow : Window
     private static UIElement Group(string name) =>
         new TextBlock { Text = name, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 16, 0, 2), Foreground = new SolidColorBrush(Color.FromRgb(80, 96, 152)) };
 
-    private static UIElement Row(string label, UIElement control)
+    private static UIElement Row(string label, UIElement control, double labelWidth = 110)
     {
         var grid = new Grid { Margin = new Thickness(0, 5, 0, 5) };
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(110) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(labelWidth) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var text = new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center, Foreground = new SolidColorBrush(Color.FromRgb(60, 66, 88)) };
         Grid.SetColumn(text, 0); grid.Children.Add(text);
@@ -1051,6 +1074,7 @@ internal sealed class SettingsWindow : Window
         settings.HideOnFullscreen = hide.IsChecked == true;
         settings.AutoStart = auto.IsChecked == true;
         settings.LockPosition = lockPos.IsChecked == true;
+        settings.PinHotkey = pinKey.Text.Trim(); // local patch (置顶)
         settings.SessionTarget = string.IsNullOrWhiteSpace(session.Text) ? null : session.Text.Trim();
         settings.Checked().Save();
         AutoStartSet(settings.AutoStart);
